@@ -1,731 +1,881 @@
 /**
- * Space Invaders Game - Main Game Loop Architecture
+ * Space Invaders Game - Core Game Class
  * 
- * This module implements the core game loop using requestAnimationFrame with:
- * - Delta time calculations for frame-rate independent movement
- * - Frame rate management and monitoring
- * - Game state management integration
- * - Performance monitoring and optimization
+ * This module implements the main game class for a browser-based Space Invaders game.
+ * It handles Canvas initialization, responsive design, game loop management, and
+ * provides a clean architecture foundation for the game systems.
+ * 
+ * Key Features:
+ * - HTML5 Canvas initialization with responsive design
+ * - Game state management with proper lifecycle
+ * - Performance monitoring and frame rate control
  * - Error handling and graceful degradation
+ * - Event-driven architecture for loose coupling
+ * - Mobile-first responsive design
  * 
- * Architecture:
- * - Clean separation between update and render cycles
- * - Event-driven state management
- * - Resource management with cleanup
- * - Configurable performance settings
+ * Architecture Decisions:
+ * - Uses composition over inheritance for game systems
+ * - Implements observer pattern for state changes
+ * - Separates concerns between rendering and game logic
+ * - Provides dependency injection points for testing
  * 
- * Dependencies: None (uses only standard browser APIs)
- * Browser Support: Modern browsers with requestAnimationFrame support
+ * @author Space Invaders Development Team
+ * @version 1.0.6
+ * @since 2025-01-27
  */
 
 /**
  * Game configuration constants
  * @readonly
- * @enum {number}
+ * @enum {number|string}
  */
 const GAME_CONFIG = {
+    // Canvas settings
+    DEFAULT_WIDTH: 800,
+    DEFAULT_HEIGHT: 600,
+    MIN_WIDTH: 320,
+    MIN_HEIGHT: 240,
+    ASPECT_RATIO: 4/3,
+    
+    // Performance settings
     TARGET_FPS: 60,
-    MAX_DELTA_TIME: 1000 / 30, // Cap at 30fps minimum
+    MAX_DELTA_TIME: 1000/30, // Cap at 30fps minimum
     PERFORMANCE_SAMPLE_SIZE: 60,
-    DEBUG_MODE: false,
-    CANVAS_WIDTH: 800,
-    CANVAS_HEIGHT: 600
+    
+    // Game states
+    STATES: {
+        LOADING: 'loading',
+        MENU: 'menu',
+        PLAYING: 'playing',
+        PAUSED: 'paused',
+        GAME_OVER: 'game_over'
+    },
+    
+    // Events
+    EVENTS: {
+        STATE_CHANGE: 'stateChange',
+        RESIZE: 'resize',
+        PERFORMANCE_UPDATE: 'performanceUpdate',
+        ERROR: 'error'
+    }
 };
 
 /**
- * Game states enumeration
- * @readonly
- * @enum {string}
+ * Custom error classes for game-specific error handling
  */
-const GAME_STATES = {
-    LOADING: 'loading',
-    MENU: 'menu',
-    PLAYING: 'playing',
-    PAUSED: 'paused',
-    GAME_OVER: 'game_over',
-    ERROR: 'error'
-};
+class GameError extends Error {
+    constructor(message, code = 'GAME_ERROR', context = {}) {
+        super(message);
+        this.name = 'GameError';
+        this.code = code;
+        this.context = context;
+        this.timestamp = Date.now();
+    }
+}
+
+class CanvasError extends GameError {
+    constructor(message, context = {}) {
+        super(message, 'CANVAS_ERROR', context);
+        this.name = 'CanvasError';
+    }
+}
 
 /**
- * Performance metrics tracker
+ * Performance monitor for tracking game performance metrics
  */
 class PerformanceMonitor {
     constructor(sampleSize = GAME_CONFIG.PERFORMANCE_SAMPLE_SIZE) {
         this.sampleSize = sampleSize;
         this.frameTimes = [];
         this.lastFrameTime = 0;
-        this.averageFPS = 0;
-        this.minFPS = Infinity;
-        this.maxFPS = 0;
-    }
-
-    /**
-     * Record a frame time sample
-     * @param {number} deltaTime - Time since last frame in milliseconds
-     */
-    recordFrame(deltaTime) {
-        const fps = 1000 / deltaTime;
-        
-        this.frameTimes.push(fps);
-        if (this.frameTimes.length > this.sampleSize) {
-            this.frameTimes.shift();
-        }
-
-        this.averageFPS = this.frameTimes.reduce((sum, fps) => sum + fps, 0) / this.frameTimes.length;
-        this.minFPS = Math.min(this.minFPS, fps);
-        this.maxFPS = Math.max(this.maxFPS, fps);
-    }
-
-    /**
-     * Get current performance metrics
-     * @returns {Object} Performance statistics
-     */
-    getMetrics() {
-        return {
-            averageFPS: Math.round(this.averageFPS),
-            minFPS: Math.round(this.minFPS),
-            maxFPS: Math.round(this.maxFPS),
-            sampleCount: this.frameTimes.length
+        this.metrics = {
+            fps: 0,
+            averageFrameTime: 0,
+            minFrameTime: Infinity,
+            maxFrameTime: 0
         };
     }
 
     /**
-     * Reset performance tracking
+     * Update performance metrics with current frame time
+     * @param {number} currentTime - Current timestamp
      */
-    reset() {
-        this.frameTimes = [];
-        this.averageFPS = 0;
-        this.minFPS = Infinity;
-        this.maxFPS = 0;
-    }
-}
-
-/**
- * Game state manager for handling state transitions
- */
-class GameStateManager {
-    constructor() {
-        this.currentState = GAME_STATES.LOADING;
-        this.previousState = null;
-        this.stateChangeListeners = new Map();
-        this.stateData = new Map();
-    }
-
-    /**
-     * Change to a new game state
-     * @param {string} newState - The state to transition to
-     * @param {Object} data - Optional data to pass with state change
-     */
-    changeState(newState, data = null) {
-        if (!Object.values(GAME_STATES).includes(newState)) {
-            throw new Error(`Invalid game state: ${newState}`);
+    update(currentTime) {
+        if (this.lastFrameTime > 0) {
+            const frameTime = currentTime - this.lastFrameTime;
+            this.frameTimes.push(frameTime);
+            
+            if (this.frameTimes.length > this.sampleSize) {
+                this.frameTimes.shift();
+            }
+            
+            this._calculateMetrics();
         }
-
-        const oldState = this.currentState;
-        this.previousState = oldState;
-        this.currentState = newState;
-
-        if (data) {
-            this.stateData.set(newState, data);
-        }
-
-        this.notifyStateChange(oldState, newState, data);
+        this.lastFrameTime = currentTime;
     }
 
     /**
-     * Get current game state
-     * @returns {string} Current state
-     */
-    getCurrentState() {
-        return this.currentState;
-    }
-
-    /**
-     * Get data associated with current state
-     * @returns {Object|null} State data
-     */
-    getStateData() {
-        return this.stateData.get(this.currentState) || null;
-    }
-
-    /**
-     * Add listener for state changes
-     * @param {string} state - State to listen for
-     * @param {Function} callback - Callback function
-     */
-    addStateChangeListener(state, callback) {
-        if (!this.stateChangeListeners.has(state)) {
-            this.stateChangeListeners.set(state, []);
-        }
-        this.stateChangeListeners.get(state).push(callback);
-    }
-
-    /**
-     * Notify all listeners of state change
+     * Calculate performance metrics from frame time samples
      * @private
      */
-    notifyStateChange(oldState, newState, data) {
-        const listeners = this.stateChangeListeners.get(newState) || [];
-        listeners.forEach(callback => {
-            try {
-                callback(oldState, newState, data);
-            } catch (error) {
-                console.error('Error in state change listener:', error);
-            }
-        });
+    _calculateMetrics() {
+        if (this.frameTimes.length === 0) return;
+        
+        const sum = this.frameTimes.reduce((a, b) => a + b, 0);
+        this.metrics.averageFrameTime = sum / this.frameTimes.length;
+        this.metrics.fps = Math.round(1000 / this.metrics.averageFrameTime);
+        this.metrics.minFrameTime = Math.min(...this.frameTimes);
+        this.metrics.maxFrameTime = Math.max(...this.frameTimes);
+    }
+
+    /**
+     * Get current performance metrics
+     * @returns {Object} Performance metrics object
+     */
+    getMetrics() {
+        return { ...this.metrics };
     }
 }
 
 /**
- * Main Game class implementing the core game loop
+ * Event emitter for game events
+ */
+class GameEventEmitter {
+    constructor() {
+        this.listeners = new Map();
+    }
+
+    /**
+     * Add event listener
+     * @param {string} event - Event name
+     * @param {Function} callback - Event callback
+     */
+    on(event, callback) {
+        if (!this.listeners.has(event)) {
+            this.listeners.set(event, []);
+        }
+        this.listeners.get(event).push(callback);
+    }
+
+    /**
+     * Remove event listener
+     * @param {string} event - Event name
+     * @param {Function} callback - Event callback to remove
+     */
+    off(event, callback) {
+        if (this.listeners.has(event)) {
+            const callbacks = this.listeners.get(event);
+            const index = callbacks.indexOf(callback);
+            if (index > -1) {
+                callbacks.splice(index, 1);
+            }
+        }
+    }
+
+    /**
+     * Emit event to all listeners
+     * @param {string} event - Event name
+     * @param {*} data - Event data
+     */
+    emit(event, data) {
+        if (this.listeners.has(event)) {
+            this.listeners.get(event).forEach(callback => {
+                try {
+                    callback(data);
+                } catch (error) {
+                    console.error(`Error in event listener for ${event}:`, error);
+                }
+            });
+        }
+    }
+}
+
+/**
+ * Main Game class - Core game engine and canvas management
+ * 
+ * Responsibilities:
+ * - Canvas initialization and responsive handling
+ * - Game loop management with frame rate control
+ * - State management and transitions
+ * - Performance monitoring and optimization
+ * - Error handling and recovery
+ * - Event coordination between game systems
  */
 class Game {
-    constructor(canvasId = 'gameCanvas') {
-        // Core components
-        this.canvas = null;
-        this.context = null;
+    /**
+     * Initialize the game with configuration options
+     * @param {Object} options - Game configuration options
+     * @param {string} options.canvasId - Canvas element ID
+     * @param {number} options.width - Initial canvas width
+     * @param {number} options.height - Initial canvas height
+     * @param {boolean} options.responsive - Enable responsive design
+     * @param {boolean} options.debug - Enable debug mode
+     */
+    constructor(options = {}) {
+        // Validate and set configuration
+        this.config = this._validateConfig(options);
+        
+        // Initialize core systems
+        this.eventEmitter = new GameEventEmitter();
+        this.performanceMonitor = new PerformanceMonitor();
+        
+        // Game state
+        this.currentState = GAME_CONFIG.STATES.LOADING;
         this.isRunning = false;
         this.isPaused = false;
         
-        // Timing
-        this.lastTime = 0;
-        this.accumulator = 0;
-        this.fixedTimeStep = 1000 / GAME_CONFIG.TARGET_FPS;
-        
-        // Managers
-        this.stateManager = new GameStateManager();
-        this.performanceMonitor = new PerformanceMonitor();
+        // Canvas and rendering
+        this.canvas = null;
+        this.context = null;
+        this.devicePixelRatio = window.devicePixelRatio || 1;
         
         // Game loop
+        this.lastTime = 0;
+        this.accumulator = 0;
         this.animationFrameId = null;
-        this.gameLoopBound = this.gameLoop.bind(this);
+        
+        // Responsive design
+        this.resizeObserver = null;
+        this.orientationChangeHandler = null;
         
         // Error handling
-        this.errorHandler = this.handleError.bind(this);
-        window.addEventListener('error', this.errorHandler);
-        window.addEventListener('unhandledrejection', this.errorHandler);
+        this.errorCount = 0;
+        this.maxErrors = 10;
         
-        // Initialize
-        this.initializeCanvas(canvasId);
-        this.setupEventListeners();
-        
-        console.log('Game initialized successfully');
+        // Initialize the game
+        this._initialize();
     }
 
     /**
-     * Initialize the game canvas
-     * @param {string} canvasId - Canvas element ID
+     * Validate and normalize configuration options
+     * @param {Object} options - Raw configuration options
+     * @returns {Object} Validated configuration
      * @private
      */
-    initializeCanvas(canvasId) {
+    _validateConfig(options) {
+        const config = {
+            canvasId: options.canvasId || 'gameCanvas',
+            width: Math.max(options.width || GAME_CONFIG.DEFAULT_WIDTH, GAME_CONFIG.MIN_WIDTH),
+            height: Math.max(options.height || GAME_CONFIG.DEFAULT_HEIGHT, GAME_CONFIG.MIN_HEIGHT),
+            responsive: options.responsive !== false,
+            debug: Boolean(options.debug),
+            targetFPS: options.targetFPS || GAME_CONFIG.TARGET_FPS
+        };
+
+        // Ensure aspect ratio is maintained if responsive
+        if (config.responsive) {
+            const aspectRatio = config.width / config.height;
+            if (Math.abs(aspectRatio - GAME_CONFIG.ASPECT_RATIO) > 0.1) {
+                config.height = Math.round(config.width / GAME_CONFIG.ASPECT_RATIO);
+            }
+        }
+
+        return config;
+    }
+
+    /**
+     * Initialize the game systems
+     * @private
+     */
+    async _initialize() {
         try {
-            this.canvas = document.getElementById(canvasId);
-            if (!this.canvas) {
-                // Create canvas if it doesn't exist
-                this.canvas = document.createElement('canvas');
-                this.canvas.id = canvasId;
-                this.canvas.width = GAME_CONFIG.CANVAS_WIDTH;
-                this.canvas.height = GAME_CONFIG.CANVAS_HEIGHT;
-                document.body.appendChild(this.canvas);
+            this._log('Initializing game...', { config: this.config });
+            
+            await this._initializeCanvas();
+            this._setupEventListeners();
+            this._setupErrorHandling();
+            
+            if (this.config.responsive) {
+                this._setupResponsiveDesign();
             }
-
-            this.context = this.canvas.getContext('2d');
-            if (!this.context) {
-                throw new Error('Failed to get 2D rendering context');
-            }
-
-            // Set canvas properties
-            this.canvas.width = GAME_CONFIG.CANVAS_WIDTH;
-            this.canvas.height = GAME_CONFIG.CANVAS_HEIGHT;
-            this.context.imageSmoothingEnabled = false; // Pixel-perfect rendering
-
+            
+            this._setState(GAME_CONFIG.STATES.MENU);
+            this._log('Game initialization complete');
+            
         } catch (error) {
-            this.handleError(error);
-            throw new Error('Failed to initialize canvas: ' + error.message);
+            this._handleError(error, 'Failed to initialize game');
+            throw error;
         }
     }
 
     /**
-     * Setup event listeners for game control
+     * Initialize HTML5 Canvas with proper configuration
      * @private
      */
-    setupEventListeners() {
-        // Visibility API for pause/resume
+    async _initializeCanvas() {
+        // Get or create canvas element
+        this.canvas = document.getElementById(this.config.canvasId);
+        
+        if (!this.canvas) {
+            this.canvas = document.createElement('canvas');
+            this.canvas.id = this.config.canvasId;
+            document.body.appendChild(this.canvas);
+        }
+
+        // Validate canvas support
+        if (!this.canvas.getContext) {
+            throw new CanvasError('Canvas not supported by browser');
+        }
+
+        // Get 2D rendering context
+        this.context = this.canvas.getContext('2d');
+        if (!this.context) {
+            throw new CanvasError('Failed to get 2D rendering context');
+        }
+
+        // Configure canvas for high DPI displays
+        this._configureHighDPI();
+        
+        // Set initial size
+        this._resizeCanvas(this.config.width, this.config.height);
+        
+        // Configure rendering context
+        this._configureRenderingContext();
+        
+        this._log('Canvas initialized', {
+            width: this.canvas.width,
+            height: this.canvas.height,
+            devicePixelRatio: this.devicePixelRatio
+        });
+    }
+
+    /**
+     * Configure canvas for high DPI displays
+     * @private
+     */
+    _configureHighDPI() {
+        // Get the device pixel ratio, falling back to 1
+        this.devicePixelRatio = window.devicePixelRatio || 1;
+        
+        // Only apply scaling if pixel ratio is greater than 1
+        if (this.devicePixelRatio > 1) {
+            this._log('Configuring high DPI display', { ratio: this.devicePixelRatio });
+        }
+    }
+
+    /**
+     * Configure rendering context with optimal settings
+     * @private
+     */
+    _configureRenderingContext() {
+        // Disable image smoothing for pixel-perfect rendering
+        this.context.imageSmoothingEnabled = false;
+        
+        // Set text rendering properties
+        this.context.textAlign = 'left';
+        this.context.textBaseline = 'top';
+        
+        // Set default styles
+        this.context.fillStyle = '#000000';
+        this.context.strokeStyle = '#ffffff';
+        this.context.lineWidth = 1;
+    }
+
+    /**
+     * Setup responsive design handlers
+     * @private
+     */
+    _setupResponsiveDesign() {
+        // Handle window resize
+        const resizeHandler = this._debounce(() => {
+            this._handleResize();
+        }, 250);
+
+        window.addEventListener('resize', resizeHandler);
+        
+        // Handle orientation change on mobile
+        this.orientationChangeHandler = () => {
+            // Delay to allow orientation change to complete
+            setTimeout(() => this._handleResize(), 100);
+        };
+        
+        window.addEventListener('orientationchange', this.orientationChangeHandler);
+        
+        // Use ResizeObserver if available for more precise resize detection
+        if (window.ResizeObserver) {
+            this.resizeObserver = new ResizeObserver(entries => {
+                for (const entry of entries) {
+                    if (entry.target === this.canvas.parentElement) {
+                        this._handleResize();
+                        break;
+                    }
+                }
+            });
+            
+            if (this.canvas.parentElement) {
+                this.resizeObserver.observe(this.canvas.parentElement);
+            }
+        }
+        
+        // Initial resize to fit container
+        this._handleResize();
+    }
+
+    /**
+     * Handle window/container resize
+     * @private
+     */
+    _handleResize() {
+        try {
+            const container = this.canvas.parentElement || document.body;
+            const containerRect = container.getBoundingClientRect();
+            
+            // Calculate optimal size maintaining aspect ratio
+            const containerAspect = containerRect.width / containerRect.height;
+            const gameAspect = GAME_CONFIG.ASPECT_RATIO;
+            
+            let newWidth, newHeight;
+            
+            if (containerAspect > gameAspect) {
+                // Container is wider - fit to height
+                newHeight = Math.max(containerRect.height * 0.9, GAME_CONFIG.MIN_HEIGHT);
+                newWidth = newHeight * gameAspect;
+            } else {
+                // Container is taller - fit to width
+                newWidth = Math.max(containerRect.width * 0.9, GAME_CONFIG.MIN_WIDTH);
+                newHeight = newWidth / gameAspect;
+            }
+            
+            // Ensure minimum sizes
+            newWidth = Math.max(newWidth, GAME_CONFIG.MIN_WIDTH);
+            newHeight = Math.max(newHeight, GAME_CONFIG.MIN_HEIGHT);
+            
+            this._resizeCanvas(newWidth, newHeight);
+            
+            this.eventEmitter.emit(GAME_CONFIG.EVENTS.RESIZE, {
+                width: newWidth,
+                height: newHeight,
+                containerWidth: containerRect.width,
+                containerHeight: containerRect.height
+            });
+            
+        } catch (error) {
+            this._handleError(error, 'Failed to handle resize');
+        }
+    }
+
+    /**
+     * Resize canvas with proper scaling
+     * @param {number} width - New width
+     * @param {number} height - New height
+     * @private
+     */
+    _resizeCanvas(width, height) {
+        // Set display size (CSS pixels)
+        this.canvas.style.width = width + 'px';
+        this.canvas.style.height = height + 'px';
+        
+        // Set actual size in memory (scaled for high DPI)
+        this.canvas.width = width * this.devicePixelRatio;
+        this.canvas.height = height * this.devicePixelRatio;
+        
+        // Scale the drawing context so everything draws at the correct size
+        this.context.scale(this.devicePixelRatio, this.devicePixelRatio);
+        
+        // Reconfigure context after resize
+        this._configureRenderingContext();
+    }
+
+    /**
+     * Setup global event listeners
+     * @private
+     */
+    _setupEventListeners() {
+        // Visibility change handling for pause/resume
         document.addEventListener('visibilitychange', () => {
-            if (document.hidden) {
+            if (document.hidden && this.isRunning) {
                 this.pause();
-            } else if (this.stateManager.getCurrentState() === GAME_STATES.PAUSED) {
+            } else if (!document.hidden && this.isPaused) {
                 this.resume();
             }
         });
-
-        // Keyboard controls
-        document.addEventListener('keydown', (event) => {
-            this.handleKeyDown(event);
+        
+        // Focus/blur handling
+        window.addEventListener('blur', () => {
+            if (this.isRunning) this.pause();
         });
-
-        document.addEventListener('keyup', (event) => {
-            this.handleKeyUp(event);
-        });
-
-        // Window resize
-        window.addEventListener('resize', () => {
-            this.handleResize();
+        
+        window.addEventListener('focus', () => {
+            if (this.isPaused) this.resume();
         });
     }
 
     /**
-     * Start the game loop
+     * Setup global error handling
+     * @private
      */
-    start() {
+    _setupErrorHandling() {
+        window.addEventListener('error', (event) => {
+            this._handleError(event.error, 'Uncaught error');
+        });
+        
+        window.addEventListener('unhandledrejection', (event) => {
+            this._handleError(event.reason, 'Unhandled promise rejection');
+        });
+    }
+
+    /**
+     * Start the game
+     * @returns {Promise<void>}
+     */
+    async start() {
         if (this.isRunning) {
-            console.warn('Game is already running');
+            this._log('Game already running');
             return;
         }
-
+        
         try {
+            this._log('Starting game...');
             this.isRunning = true;
             this.isPaused = false;
-            this.lastTime = performance.now();
-            this.stateManager.changeState(GAME_STATES.PLAYING);
+            this._setState(GAME_CONFIG.STATES.PLAYING);
             
             // Start the game loop
-            this.animationFrameId = requestAnimationFrame(this.gameLoopBound);
+            this.lastTime = performance.now();
+            this._gameLoop(this.lastTime);
             
-            console.log('Game started');
+            this._log('Game started successfully');
+            
         } catch (error) {
-            this.handleError(error);
+            this._handleError(error, 'Failed to start game');
+            this.isRunning = false;
+            throw error;
         }
-    }
-
-    /**
-     * Stop the game loop
-     */
-    stop() {
-        this.isRunning = false;
-        this.isPaused = false;
-        
-        if (this.animationFrameId) {
-            cancelAnimationFrame(this.animationFrameId);
-            this.animationFrameId = null;
-        }
-        
-        this.stateManager.changeState(GAME_STATES.MENU);
-        console.log('Game stopped');
     }
 
     /**
      * Pause the game
      */
     pause() {
-        if (!this.isRunning || this.isPaused) {
-            return;
-        }
+        if (!this.isRunning || this.isPaused) return;
         
         this.isPaused = true;
-        this.stateManager.changeState(GAME_STATES.PAUSED);
-        console.log('Game paused');
+        this._setState(GAME_CONFIG.STATES.PAUSED);
+        
+        if (this.animationFrameId) {
+            cancelAnimationFrame(this.animationFrameId);
+            this.animationFrameId = null;
+        }
+        
+        this._log('Game paused');
     }
 
     /**
      * Resume the game
      */
     resume() {
-        if (!this.isRunning || !this.isPaused) {
-            return;
-        }
+        if (!this.isRunning || !this.isPaused) return;
         
         this.isPaused = false;
-        this.lastTime = performance.now(); // Reset timing
-        this.stateManager.changeState(GAME_STATES.PLAYING);
-        console.log('Game resumed');
+        this._setState(GAME_CONFIG.STATES.PLAYING);
+        
+        // Reset timing to prevent large delta
+        this.lastTime = performance.now();
+        this._gameLoop(this.lastTime);
+        
+        this._log('Game resumed');
     }
 
     /**
-     * Main game loop using requestAnimationFrame
-     * @param {number} currentTime - Current timestamp from requestAnimationFrame
+     * Stop the game
+     */
+    stop() {
+        if (!this.isRunning) return;
+        
+        this.isRunning = false;
+        this.isPaused = false;
+        
+        if (this.animationFrameId) {
+            cancelAnimationFrame(this.animationFrameId);
+            this.animationFrameId = null;
+        }
+        
+        this._setState(GAME_CONFIG.STATES.MENU);
+        this._log('Game stopped');
+    }
+
+    /**
+     * Main game loop with fixed timestep
+     * @param {number} currentTime - Current timestamp
      * @private
      */
-    gameLoop(currentTime) {
-        if (!this.isRunning) {
-            return;
-        }
-
+    _gameLoop(currentTime) {
+        if (!this.isRunning || this.isPaused) return;
+        
         try {
             // Calculate delta time
             const deltaTime = Math.min(currentTime - this.lastTime, GAME_CONFIG.MAX_DELTA_TIME);
             this.lastTime = currentTime;
-
-            // Record performance metrics
-            if (deltaTime > 0) {
-                this.performanceMonitor.recordFrame(deltaTime);
+            
+            // Update performance metrics
+            this.performanceMonitor.update(currentTime);
+            
+            // Fixed timestep game loop
+            this.accumulator += deltaTime;
+            const fixedTimeStep = 1000 / this.config.targetFPS;
+            
+            // Update game logic with fixed timestep
+            while (this.accumulator >= fixedTimeStep) {
+                this._update(fixedTimeStep);
+                this.accumulator -= fixedTimeStep;
             }
-
-            // Skip update if paused, but continue rendering
-            if (!this.isPaused) {
-                // Fixed timestep update with accumulator
-                this.accumulator += deltaTime;
-                
-                while (this.accumulator >= this.fixedTimeStep) {
-                    this.update(this.fixedTimeStep);
-                    this.accumulator -= this.fixedTimeStep;
-                }
-            }
-
-            // Always render (for pause screens, etc.)
-            this.render(deltaTime);
-
-            // Debug information
-            if (GAME_CONFIG.DEBUG_MODE) {
-                this.renderDebugInfo();
-            }
-
+            
+            // Render with interpolation
+            const interpolation = this.accumulator / fixedTimeStep;
+            this._render(interpolation);
+            
             // Schedule next frame
-            this.animationFrameId = requestAnimationFrame(this.gameLoopBound);
-
+            this.animationFrameId = requestAnimationFrame((time) => this._gameLoop(time));
+            
         } catch (error) {
-            this.handleError(error);
+            this._handleError(error, 'Error in game loop');
+            
+            // Try to recover by continuing the loop
+            if (this.errorCount < this.maxErrors) {
+                this.animationFrameId = requestAnimationFrame((time) => this._gameLoop(time));
+            } else {
+                this.stop();
+                this._setState(GAME_CONFIG.STATES.GAME_OVER);
+            }
         }
     }
 
     /**
      * Update game logic
-     * @param {number} deltaTime - Fixed time step in milliseconds
+     * @param {number} deltaTime - Time since last update
      * @private
      */
-    update(deltaTime) {
-        const currentState = this.stateManager.getCurrentState();
-        
-        switch (currentState) {
-            case GAME_STATES.PLAYING:
-                this.updateGameplay(deltaTime);
-                break;
-            case GAME_STATES.MENU:
-                this.updateMenu(deltaTime);
-                break;
-            case GAME_STATES.GAME_OVER:
-                this.updateGameOver(deltaTime);
-                break;
-            default:
-                // Handle other states as needed
-                break;
-        }
+    _update(deltaTime) {
+        // This will be extended by game systems
+        // For now, just emit update event for other systems to handle
+        this.eventEmitter.emit('update', { deltaTime });
     }
 
     /**
-     * Update gameplay logic
-     * @param {number} deltaTime - Time step in milliseconds
+     * Render game graphics
+     * @param {number} interpolation - Interpolation factor for smooth rendering
      * @private
      */
-    updateGameplay(deltaTime) {
-        // Placeholder for game-specific update logic
-        // This would typically update:
-        // - Player position and input
-        // - Enemy movements and AI
-        // - Projectiles and collisions
-        // - Game state (score, lives, etc.)
-    }
-
-    /**
-     * Update menu logic
-     * @param {number} deltaTime - Time step in milliseconds
-     * @private
-     */
-    updateMenu(deltaTime) {
-        // Placeholder for menu update logic
-    }
-
-    /**
-     * Update game over screen logic
-     * @param {number} deltaTime - Time step in milliseconds
-     * @private
-     */
-    updateGameOver(deltaTime) {
-        // Placeholder for game over update logic
-    }
-
-    /**
-     * Render the game
-     * @param {number} deltaTime - Time since last frame in milliseconds
-     * @private
-     */
-    render(deltaTime) {
+    _render(interpolation) {
         // Clear canvas
-        this.context.fillStyle = '#000000';
-        this.context.fillRect(0, 0, this.canvas.width, this.canvas.height);
-
-        const currentState = this.stateManager.getCurrentState();
+        this.context.clearRect(0, 0, this.canvas.width / this.devicePixelRatio, this.canvas.height / this.devicePixelRatio);
         
-        switch (currentState) {
-            case GAME_STATES.LOADING:
-                this.renderLoading();
-                break;
-            case GAME_STATES.MENU:
-                this.renderMenu();
-                break;
-            case GAME_STATES.PLAYING:
-                this.renderGameplay();
-                break;
-            case GAME_STATES.PAUSED:
-                this.renderGameplay(); // Render game behind pause overlay
-                this.renderPauseOverlay();
-                break;
-            case GAME_STATES.GAME_OVER:
-                this.renderGameOver();
-                break;
-            case GAME_STATES.ERROR:
-                this.renderError();
-                break;
-            default:
-                this.renderError();
-                break;
+        // Emit render event for other systems to handle
+        this.eventEmitter.emit('render', { 
+            context: this.context, 
+            interpolation,
+            width: this.canvas.width / this.devicePixelRatio,
+            height: this.canvas.height / this.devicePixelRatio
+        });
+        
+        // Debug information
+        if (this.config.debug) {
+            this._renderDebugInfo();
         }
-    }
-
-    /**
-     * Render loading screen
-     * @private
-     */
-    renderLoading() {
-        this.context.fillStyle = '#FFFFFF';
-        this.context.font = '24px Arial';
-        this.context.textAlign = 'center';
-        this.context.fillText('Loading...', this.canvas.width / 2, this.canvas.height / 2);
-    }
-
-    /**
-     * Render main menu
-     * @private
-     */
-    renderMenu() {
-        this.context.fillStyle = '#FFFFFF';
-        this.context.font = '32px Arial';
-        this.context.textAlign = 'center';
-        this.context.fillText('SPACE INVADERS', this.canvas.width / 2, this.canvas.height / 2 - 50);
-        
-        this.context.font = '16px Arial';
-        this.context.fillText('Press SPACE to Start', this.canvas.width / 2, this.canvas.height / 2 + 20);
-        this.context.fillText('Press P to Pause/Resume', this.canvas.width / 2, this.canvas.height / 2 + 40);
-    }
-
-    /**
-     * Render gameplay
-     * @private
-     */
-    renderGameplay() {
-        // Placeholder for game rendering
-        // This would typically render:
-        // - Background/stars
-        // - Player ship
-        // - Enemies
-        // - Projectiles
-        // - UI elements (score, lives)
-        
-        this.context.fillStyle = '#00FF00';
-        this.context.font = '16px Arial';
-        this.context.textAlign = 'left';
-        this.context.fillText('Game Running...', 10, 30);
-    }
-
-    /**
-     * Render pause overlay
-     * @private
-     */
-    renderPauseOverlay() {
-        // Semi-transparent overlay
-        this.context.fillStyle = 'rgba(0, 0, 0, 0.7)';
-        this.context.fillRect(0, 0, this.canvas.width, this.canvas.height);
-        
-        this.context.fillStyle = '#FFFFFF';
-        this.context.font = '32px Arial';
-        this.context.textAlign = 'center';
-        this.context.fillText('PAUSED', this.canvas.width / 2, this.canvas.height / 2);
-        
-        this.context.font = '16px Arial';
-        this.context.fillText('Press P to Resume', this.canvas.width / 2, this.canvas.height / 2 + 40);
-    }
-
-    /**
-     * Render game over screen
-     * @private
-     */
-    renderGameOver() {
-        this.context.fillStyle = '#FF0000';
-        this.context.font = '32px Arial';
-        this.context.textAlign = 'center';
-        this.context.fillText('GAME OVER', this.canvas.width / 2, this.canvas.height / 2);
-        
-        this.context.fillStyle = '#FFFFFF';
-        this.context.font = '16px Arial';
-        this.context.fillText('Press R to Restart', this.canvas.width / 2, this.canvas.height / 2 + 40);
-    }
-
-    /**
-     * Render error screen
-     * @private
-     */
-    renderError() {
-        this.context.fillStyle = '#FF0000';
-        this.context.font = '24px Arial';
-        this.context.textAlign = 'center';
-        this.context.fillText('ERROR', this.canvas.width / 2, this.canvas.height / 2);
-        
-        this.context.fillStyle = '#FFFFFF';
-        this.context.font = '14px Arial';
-        this.context.fillText('Something went wrong. Check console for details.', this.canvas.width / 2, this.canvas.height / 2 + 30);
     }
 
     /**
      * Render debug information
      * @private
      */
-    renderDebugInfo() {
+    _renderDebugInfo() {
         const metrics = this.performanceMonitor.getMetrics();
-        
-        this.context.fillStyle = '#FFFF00';
-        this.context.font = '12px monospace';
-        this.context.textAlign = 'left';
-        
         const debugInfo = [
-            `FPS: ${metrics.averageFPS} (${metrics.minFPS}-${metrics.maxFPS})`,
-            `State: ${this.stateManager.getCurrentState()}`,
-            `Running: ${this.isRunning}`,
-            `Paused: ${this.isPaused}`
+            `FPS: ${metrics.fps}`,
+            `Frame Time: ${metrics.averageFrameTime.toFixed(2)}ms`,
+            `State: ${this.currentState}`,
+            `Canvas: ${Math.round(this.canvas.width / this.devicePixelRatio)}x${Math.round(this.canvas.height / this.devicePixelRatio)}`,
+            `DPR: ${this.devicePixelRatio}`
         ];
         
+        this.context.save();
+        this.context.fillStyle = 'rgba(0, 0, 0, 0.7)';
+        this.context.fillRect(10, 10, 200, debugInfo.length * 20 + 10);
+        
+        this.context.fillStyle = '#00ff00';
+        this.context.font = '12px monospace';
+        
         debugInfo.forEach((info, index) => {
-            this.context.fillText(info, 10, 15 + (index * 15));
+            this.context.fillText(info, 15, 25 + index * 20);
         });
+        
+        this.context.restore();
     }
 
     /**
-     * Handle keyboard input - key down
-     * @param {KeyboardEvent} event - Keyboard event
+     * Set game state with validation and events
+     * @param {string} newState - New game state
      * @private
      */
-    handleKeyDown(event) {
-        switch (event.code) {
-            case 'Space':
-                event.preventDefault();
-                if (this.stateManager.getCurrentState() === GAME_STATES.MENU) {
-                    this.start();
-                }
-                break;
-            case 'KeyP':
-                event.preventDefault();
-                if (this.isPaused) {
-                    this.resume();
-                } else {
-                    this.pause();
-                }
-                break;
-            case 'KeyR':
-                event.preventDefault();
-                if (this.stateManager.getCurrentState() === GAME_STATES.GAME_OVER) {
-                    this.restart();
-                }
-                break;
-            case 'Escape':
-                event.preventDefault();
-                this.stop();
-                break;
+    _setState(newState) {
+        if (!Object.values(GAME_CONFIG.STATES).includes(newState)) {
+            throw new GameError(`Invalid game state: ${newState}`);
+        }
+        
+        const oldState = this.currentState;
+        this.currentState = newState;
+        
+        this.eventEmitter.emit(GAME_CONFIG.EVENTS.STATE_CHANGE, {
+            oldState,
+            newState,
+            timestamp: Date.now()
+        });
+        
+        this._log('State changed', { from: oldState, to: newState });
+    }
+
+    /**
+     * Handle errors with logging and recovery
+     * @param {Error} error - Error object
+     * @param {string} context - Error context
+     * @private
+     */
+    _handleError(error, context = 'Unknown error') {
+        this.errorCount++;
+        
+        const errorInfo = {
+            message: error.message,
+            stack: error.stack,
+            context,
+            timestamp: Date.now(),
+            gameState: this.currentState,
+            errorCount: this.errorCount
+        };
+        
+        console.error(`Game Error [${context}]:`, error);
+        this._log('Error occurred', errorInfo, 'error');
+        
+        this.eventEmitter.emit(GAME_CONFIG.EVENTS.ERROR, errorInfo);
+        
+        // Stop game if too many errors
+        if (this.errorCount >= this.maxErrors) {
+            this._log('Maximum error count reached, stopping game', {}, 'error');
+            this.stop();
         }
     }
 
     /**
-     * Handle keyboard input - key up
-     * @param {KeyboardEvent} event - Keyboard event
+     * Utility function for debouncing
+     * @param {Function} func - Function to debounce
+     * @param {number} wait - Wait time in milliseconds
+     * @returns {Function} Debounced function
      * @private
      */
-    handleKeyUp(event) {
-        // Handle key release events
+    _debounce(func, wait) {
+        let timeout;
+        return function executedFunction(...args) {
+            const later = () => {
+                clearTimeout(timeout);
+                func(...args);
+            };
+            clearTimeout(timeout);
+            timeout = setTimeout(later, wait);
+        };
     }
 
     /**
-     * Handle window resize
+     * Structured logging with context
+     * @param {string} message - Log message
+     * @param {Object} context - Additional context
+     * @param {string} level - Log level
      * @private
      */
-    handleResize() {
-        // Maintain aspect ratio or adjust canvas size as needed
-        console.log('Window resized');
-    }
-
-    /**
-     * Restart the game
-     */
-    restart() {
-        this.stop();
-        this.performanceMonitor.reset();
-        this.stateManager.changeState(GAME_STATES.MENU);
-        console.log('Game restarted');
-    }
-
-    /**
-     * Handle errors gracefully
-     * @param {Error|ErrorEvent} error - Error object or event
-     * @private
-     */
-    handleError(error) {
-        console.error('Game error:', error);
+    _log(message, context = {}, level = 'info') {
+        const logEntry = {
+            timestamp: new Date().toISOString(),
+            level,
+            message,
+            context: {
+                gameState: this.currentState,
+                isRunning: this.isRunning,
+                isPaused: this.isPaused,
+                ...context
+            }
+        };
         
-        // Stop the game loop to prevent cascading errors
-        if (this.animationFrameId) {
-            cancelAnimationFrame(this.animationFrameId);
-            this.animationFrameId = null;
+        if (level === 'error') {
+            console.error(`[Game] ${message}`, logEntry);
+        } else if (this.config.debug) {
+            console.log(`[Game] ${message}`, logEntry);
         }
-        
-        this.stateManager.changeState(GAME_STATES.ERROR, { error });
-        
-        // Try to continue rendering error state
-        try {
-            this.render(0);
-        } catch (renderError) {
-            console.error('Failed to render error state:', renderError);
-        }
-    }
-
-    /**
-     * Get current performance metrics
-     * @returns {Object} Performance statistics
-     */
-    getPerformanceMetrics() {
-        return this.performanceMonitor.getMetrics();
     }
 
     /**
      * Get current game state
      * @returns {string} Current game state
      */
-    getGameState() {
-        return this.stateManager.getCurrentState();
+    getState() {
+        return this.currentState;
     }
 
     /**
-     * Cleanup resources
+     * Get canvas dimensions
+     * @returns {Object} Canvas dimensions
+     */
+    getDimensions() {
+        return {
+            width: this.canvas.width / this.devicePixelRatio,
+            height: this.canvas.height / this.devicePixelRatio,
+            devicePixelRatio: this.devicePixelRatio
+        };
+    }
+
+    /**
+     * Get performance metrics
+     * @returns {Object} Performance metrics
+     */
+    getPerformanceMetrics() {
+        return this.performanceMonitor.getMetrics();
+    }
+
+    /**
+     * Add event listener
+     * @param {string} event - Event name
+     * @param {Function} callback - Event callback
+     */
+    on(event, callback) {
+        this.eventEmitter.on(event, callback);
+    }
+
+    /**
+     * Remove event listener
+     * @param {string} event - Event name
+     * @param {Function} callback - Event callback
+     */
+    off(event, callback) {
+        this.eventEmitter.off(event, callback);
+    }
+
+    /**
+     * Cleanup resources and event listeners
      */
     destroy() {
         this.stop();
         
         // Remove event listeners
-        window.removeEventListener('error', this.errorHandler);
-        window.removeEventListener('unhandledrejection', this.errorHandler);
+        if (this.resizeObserver) {
+            this.resizeObserver.disconnect();
+        }
+        
+        if (this.orientationChangeHandler) {
+            window.removeEventListener('orientationchange', this.orientationChangeHandler);
+        }
         
         // Clear canvas
         if (this.context) {
             this.context.clearRect(0, 0, this.canvas.width, this.canvas.height);
         }
         
-        console.log('Game destroyed');
+        this._log('Game destroyed');
     }
 }
 
-// Export for use in other modules or global scope
+// Export for use in other modules
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { Game, GameStateManager, PerformanceMonitor, GAME_STATES, GAME_CONFIG };
-} else {
+    module.exports = { Game, GameError, CanvasError, GAME_CONFIG };
+} else if (typeof window !== 'undefined') {
     window.Game = Game;
-    window.GameStateManager = GameStateManager;
-    window.PerformanceMonitor = PerformanceMonitor;
-    window.GAME_STATES = GAME_STATES;
+    window.GameError = GameError;
+    window.CanvasError = CanvasError;
     window.GAME_CONFIG = GAME_CONFIG;
 }
