@@ -1,0 +1,437 @@
+/**
+ * Space Invaders JS V106 - Main Stylesheet
+ * 
+ * Comprehensive styling for the Space Invaders game including:
+ * - Core game UI elements
+ * - Performance monitoring debug overlay
+ * - Responsive design patterns
+ * - Accessibility features
+ * 
+ * Architecture: Modular CSS with BEM methodology
+ * Performance: Optimized selectors and minimal reflows
+ * Maintainability: Clear organization and documentation
+ */
+
+/* ==========================================================================
+   RESET AND BASE STYLES
+   ========================================================================== */
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+  font-family: 'Courier New', monospace;
+  background: #000;
+  color: #fff;
+}
+
+/* ==========================================================================
+   GAME CONTAINER
+   ========================================================================== */
+
+.game-container {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background: radial-gradient(ellipse at center, #001122 0%, #000000 100%);
+}
+
+.game-canvas {
+  border: 2px solid #00ff00;
+  background: #000;
+  image-rendering: pixelated;
+  image-rendering: -moz-crisp-edges;
+  image-rendering: crisp-edges;
+}
+
+/* ==========================================================================
+   PERFORMANCE MONITORING DEBUG UI
+   ========================================================================== */
+
+.debug-overlay {
+  position: fixed;
+  top: 10px;
+  right: 10px;
+  z-index: 9999;
+  background: rgba(0, 0, 0, 0.85);
+  border: 1px solid #00ff00;
+  border-radius: 4px;
+  padding: 12px;
+  font-family: 'Courier New', monospace;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #00ff00;
+  min-width: 200px;
+  backdrop-filter: blur(2px);
+  transition: opacity 0.3s ease;
+}
+
+.debug-overlay.hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.debug-overlay__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid #004400;
+}
+
+.debug-overlay__title {
+  font-weight: bold;
+  color: #00ff00;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.debug-overlay__toggle {
+  background: none;
+  border: 1px solid #00ff00;
+  color: #00ff00;
+  padding: 2px 6px;
+  font-size: 10px;
+  cursor: pointer;
+  border-radius: 2px;
+  transition: all 0.2s ease;
+}
+
+.debug-overlay__toggle:hover {
+  background: #00ff00;
+  color: #000;
+}
+
+.debug-overlay__section {
+  margin-bottom: 12px;
+}
+
+.debug-overlay__section:last-child {
+  margin-bottom: 0;
+}
+
+.debug-overlay__section-title {
+  font-weight: bold;
+  color: #ffff00;
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.5px;
+}
+
+.debug-overlay__metrics {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 8px;
+}
+
+.debug-overlay__metric {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.debug-overlay__metric-label {
+  color: #cccccc;
+  font-size: 11px;
+}
+
+.debug-overlay__metric-value {
+  color: #00ff00;
+  font-weight: bold;
+  font-size: 11px;
+  text-align: right;
+}
+
+/* Performance status indicators */
+.debug-overlay__metric-value.good {
+  color: #00ff00;
+}
+
+.debug-overlay__metric-value.warning {
+  color: #ffff00;
+}
+
+.debug-overlay__metric-value.critical {
+  color: #ff0000;
+  animation: blink 1s infinite;
+}
+
+@keyframes blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0.5; }
+}
+
+/* FPS Graph */
+.debug-overlay__fps-graph {
+  width: 100%;
+  height: 40px;
+  background: rgba(0, 0, 0, 0.5);
+  border: 1px solid #004400;
+  margin-top: 4px;
+  position: relative;
+  overflow: hidden;
+}
+
+.debug-overlay__fps-bar {
+  position: absolute;
+  bottom: 0;
+  width: 2px;
+  background: #00ff00;
+  transition: height 0.1s ease;
+}
+
+.debug-overlay__fps-bar.warning {
+  background: #ffff00;
+}
+
+.debug-overlay__fps-bar.critical {
+  background: #ff0000;
+}
+
+/* Memory usage visualization */
+.debug-overlay__memory-bar {
+  width: 100%;
+  height: 8px;
+  background: rgba(0, 0, 0, 0.5);
+  border: 1px solid #004400;
+  margin-top: 2px;
+  position: relative;
+  overflow: hidden;
+}
+
+.debug-overlay__memory-fill {
+  height: 100%;
+  background: linear-gradient(to right, #00ff00, #ffff00, #ff0000);
+  transition: width 0.3s ease;
+  min-width: 2px;
+}
+
+/* Entity count display */
+.debug-overlay__entity-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 2px;
+  margin-top: 4px;
+}
+
+.debug-overlay__entity-count {
+  background: rgba(0, 255, 0, 0.1);
+  border: 1px solid #004400;
+  padding: 2px 4px;
+  text-align: center;
+  font-size: 10px;
+}
+
+.debug-overlay__entity-count-label {
+  display: block;
+  color: #cccccc;
+  font-size: 9px;
+}
+
+.debug-overlay__entity-count-value {
+  display: block;
+  color: #00ff00;
+  font-weight: bold;
+}
+
+/* Performance warnings */
+.debug-overlay__warnings {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #004400;
+}
+
+.debug-overlay__warning {
+  display: flex;
+  align-items: center;
+  margin-bottom: 4px;
+  padding: 2px 4px;
+  background: rgba(255, 255, 0, 0.1);
+  border-left: 3px solid #ffff00;
+  font-size: 10px;
+}
+
+.debug-overlay__warning.critical {
+  background: rgba(255, 0, 0, 0.1);
+  border-left-color: #ff0000;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+.debug-overlay__warning-icon {
+  margin-right: 4px;
+  font-weight: bold;
+}
+
+/* Collapsible sections */
+.debug-overlay__collapsible {
+  cursor: pointer;
+  user-select: none;
+}
+
+.debug-overlay__collapsible::before {
+  content: '▼ ';
+  transition: transform 0.2s ease;
+}
+
+.debug-overlay__collapsible.collapsed::before {
+  transform: rotate(-90deg);
+}
+
+.debug-overlay__collapsible-content {
+  max-height: 200px;
+  overflow: hidden;
+  transition: max-height 0.3s ease;
+}
+
+.debug-overlay__collapsible.collapsed + .debug-overlay__collapsible-content {
+  max-height: 0;
+}
+
+/* ==========================================================================
+   RESPONSIVE DEBUG UI
+   ========================================================================== */
+
+@media (max-width: 768px) {
+  .debug-overlay {
+    top: 5px;
+    right: 5px;
+    left: 5px;
+    min-width: auto;
+    font-size: 11px;
+    padding: 8px;
+  }
+  
+  .debug-overlay__metrics {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+  
+  .debug-overlay__entity-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 480px) {
+  .debug-overlay {
+    font-size: 10px;
+    padding: 6px;
+  }
+  
+  .debug-overlay__fps-graph {
+    height: 30px;
+  }
+}
+
+/* ==========================================================================
+   ACCESSIBILITY FEATURES
+   ========================================================================== */
+
+.debug-overlay:focus-within {
+  outline: 2px solid #00ff00;
+  outline-offset: 2px;
+}
+
+.debug-overlay__toggle:focus {
+  outline: 1px solid #00ff00;
+  outline-offset: 1px;
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+  .debug-overlay {
+    background: #000;
+    border-color: #fff;
+  }
+  
+  .debug-overlay__metric-value.good {
+    color: #fff;
+  }
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  .debug-overlay,
+  .debug-overlay__fps-bar,
+  .debug-overlay__memory-fill,
+  .debug-overlay__collapsible::before,
+  .debug-overlay__collapsible-content {
+    transition: none;
+  }
+  
+  .debug-overlay__metric-value.critical,
+  .debug-overlay__warning.critical {
+    animation: none;
+  }
+}
+
+/* ==========================================================================
+   UTILITY CLASSES
+   ========================================================================== */
+
+.debug-overlay--minimized {
+  width: 40px;
+  height: 40px;
+  padding: 8px;
+  overflow: hidden;
+}
+
+.debug-overlay--minimized .debug-overlay__section,
+.debug-overlay--minimized .debug-overlay__header {
+  display: none;
+}
+
+.debug-overlay--minimized::after {
+  content: 'DEBUG';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) rotate(-90deg);
+  font-size: 8px;
+  font-weight: bold;
+  color: #00ff00;
+  white-space: nowrap;
+}
+
+/* Print styles (hide debug overlay) */
+@media print {
+  .debug-overlay {
+    display: none !important;
+  }
+}
+
+/* ==========================================================================
+   PERFORMANCE OPTIMIZATIONS
+   ========================================================================== */
+
+/* Use GPU acceleration for animations */
+.debug-overlay__fps-bar,
+.debug-overlay__memory-fill {
+  will-change: height, width;
+  transform: translateZ(0);
+}
+
+/* Optimize repaints */
+.debug-overlay__metric-value {
+  contain: layout style;
+}
+
+/* Prevent layout thrashing */
+.debug-overlay__fps-graph,
+.debug-overlay__memory-bar {
+  contain: layout;
+}
