@@ -1,0 +1,903 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Space Invaders JS V106 - Test Runner</title>
+    <style>
+        /* Reset and base styles */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            color: #ffffff;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            overflow: hidden;
+        }
+
+        .header {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 20px;
+            text-align: center;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+        }
+
+        .header p {
+            opacity: 0.8;
+            font-size: 1.1rem;
+        }
+
+        .controls {
+            padding: 20px;
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+            justify-content: center;
+            background: rgba(0, 0, 0, 0.2);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 1rem;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .btn-primary {
+            background: linear-gradient(45deg, #4CAF50, #45a049);
+            color: white;
+        }
+
+        .btn-secondary {
+            background: linear-gradient(45deg, #2196F3, #1976D2);
+            color: white;
+        }
+
+        .btn-danger {
+            background: linear-gradient(45deg, #f44336, #d32f2f);
+            color: white;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            padding: 20px;
+            background: rgba(0, 0, 0, 0.1);
+        }
+
+        .stat-card {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .stat-value {
+            font-size: 2rem;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        .stat-label {
+            opacity: 0.8;
+            text-transform: uppercase;
+            font-size: 0.9rem;
+            letter-spacing: 1px;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 4px;
+            overflow: hidden;
+            margin: 20px 0;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #4CAF50, #8BC34A);
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+
+        .test-results {
+            padding: 20px;
+            max-height: 500px;
+            overflow-y: auto;
+        }
+
+        .test-suite {
+            margin-bottom: 20px;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        .suite-header {
+            padding: 15px 20px;
+            background: rgba(0, 0, 0, 0.3);
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .suite-header:hover {
+            background: rgba(0, 0, 0, 0.4);
+        }
+
+        .suite-title {
+            font-weight: 600;
+            font-size: 1.1rem;
+        }
+
+        .suite-status {
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .status-passed {
+            background: #4CAF50;
+            color: white;
+        }
+
+        .status-failed {
+            background: #f44336;
+            color: white;
+        }
+
+        .status-running {
+            background: #FF9800;
+            color: white;
+            animation: pulse 1.5s infinite;
+        }
+
+        .status-pending {
+            background: #9E9E9E;
+            color: white;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+
+        .test-cases {
+            padding: 0;
+            display: none;
+        }
+
+        .test-cases.expanded {
+            display: block;
+        }
+
+        .test-case {
+            padding: 12px 20px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .test-case:last-child {
+            border-bottom: none;
+        }
+
+        .test-name {
+            flex: 1;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9rem;
+        }
+
+        .test-duration {
+            margin-left: 10px;
+            opacity: 0.7;
+            font-size: 0.8rem;
+        }
+
+        .error-details {
+            margin-top: 10px;
+            padding: 10px;
+            background: rgba(244, 67, 54, 0.1);
+            border-left: 4px solid #f44336;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.8rem;
+            white-space: pre-wrap;
+            overflow-x: auto;
+        }
+
+        .console-output {
+            margin-top: 20px;
+            background: rgba(0, 0, 0, 0.5);
+            border-radius: 8px;
+            padding: 20px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9rem;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .console-line {
+            margin-bottom: 5px;
+            padding: 2px 0;
+        }
+
+        .console-error {
+            color: #ff6b6b;
+        }
+
+        .console-warn {
+            color: #ffd93d;
+        }
+
+        .console-info {
+            color: #74c0fc;
+        }
+
+        .console-log {
+            color: #ffffff;
+        }
+
+        /* Responsive design */
+        @media (max-width: 768px) {
+            body {
+                padding: 10px;
+            }
+
+            .header h1 {
+                font-size: 2rem;
+            }
+
+            .controls {
+                flex-direction: column;
+                align-items: center;
+            }
+
+            .btn {
+                width: 100%;
+                max-width: 300px;
+            }
+
+            .stats {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* Loading animation */
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: #ffffff;
+            animation: spin 1s ease-in-out infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Accessibility improvements */
+        .sr-only {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            padding: 0;
+            margin: -1px;
+            overflow: hidden;
+            clip: rect(0, 0, 0, 0);
+            white-space: nowrap;
+            border: 0;
+        }
+
+        /* Focus styles for keyboard navigation */
+        .btn:focus,
+        .suite-header:focus {
+            outline: 2px solid #ffffff;
+            outline-offset: 2px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <h1>🚀 Space Invaders Test Runner</h1>
+            <p>Browser-based JavaScript Test Suite for Space Invaders JS V106</p>
+        </header>
+
+        <div class="controls">
+            <button id="runAllBtn" class="btn btn-primary">
+                <span id="runAllText">Run All Tests</span>
+                <span id="runAllLoader" class="loading" style="display: none;"></span>
+            </button>
+            <button id="runSelectedBtn" class="btn btn-secondary">Run Selected</button>
+            <button id="clearResultsBtn" class="btn btn-danger">Clear Results</button>
+            <button id="exportResultsBtn" class="btn btn-secondary">Export Results</button>
+        </div>
+
+        <div class="stats">
+            <div class="stat-card">
+                <div id="totalTests" class="stat-value">0</div>
+                <div class="stat-label">Total Tests</div>
+            </div>
+            <div class="stat-card">
+                <div id="passedTests" class="stat-value">0</div>
+                <div class="stat-label">Passed</div>
+            </div>
+            <div class="stat-card">
+                <div id="failedTests" class="stat-value">0</div>
+                <div class="stat-label">Failed</div>
+            </div>
+            <div class="stat-card">
+                <div id="testDuration" class="stat-value">0ms</div>
+                <div class="stat-label">Duration</div>
+            </div>
+        </div>
+
+        <div class="progress-bar">
+            <div id="progressFill" class="progress-fill"></div>
+        </div>
+
+        <div id="testResults" class="test-results">
+            <div class="test-suite">
+                <div class="suite-header">
+                    <span class="suite-title">No tests loaded</span>
+                    <span class="suite-status status-pending">Pending</span>
+                </div>
+            </div>
+        </div>
+
+        <div id="consoleOutput" class="console-output" style="display: none;">
+            <h3>Console Output</h3>
+            <div id="consoleLines"></div>
+        </div>
+    </div>
+
+    <script>
+        /**
+         * Space Invaders Test Runner
+         * A comprehensive browser-based test runner for JavaScript tests
+         * 
+         * Features:
+         * - Responsive design with modern UI
+         * - Real-time test execution feedback
+         * - Detailed error reporting
+         * - Console output capture
+         * - Export functionality
+         * - Accessibility support
+         * - Performance monitoring
+         */
+
+        class TestRunner {
+            constructor() {
+                this.testSuites = new Map();
+                this.results = {
+                    total: 0,
+                    passed: 0,
+                    failed: 0,
+                    duration: 0,
+                    suites: []
+                };
+                this.isRunning = false;
+                this.consoleBuffer = [];
+                this.originalConsole = {};
+                
+                this.initializeUI();
+                this.setupConsoleCapture();
+                this.loadTestSuites();
+            }
+
+            /**
+             * Initialize UI event listeners and setup
+             */
+            initializeUI() {
+                const runAllBtn = document.getElementById('runAllBtn');
+                const runSelectedBtn = document.getElementById('runSelectedBtn');
+                const clearResultsBtn = document.getElementById('clearResultsBtn');
+                const exportResultsBtn = document.getElementById('exportResultsBtn');
+
+                runAllBtn.addEventListener('click', () => this.runAllTests());
+                runSelectedBtn.addEventListener('click', () => this.runSelectedTests());
+                clearResultsBtn.addEventListener('click', () => this.clearResults());
+                exportResultsBtn.addEventListener('click', () => this.exportResults());
+
+                // Keyboard shortcuts
+                document.addEventListener('keydown', (e) => {
+                    if (e.ctrlKey || e.metaKey) {
+                        switch (e.key) {
+                            case 'Enter':
+                                e.preventDefault();
+                                this.runAllTests();
+                                break;
+                            case 'r':
+                                e.preventDefault();
+                                this.clearResults();
+                                break;
+                        }
+                    }
+                });
+            }
+
+            /**
+             * Setup console capture to display output in the UI
+             */
+            setupConsoleCapture() {
+                const methods = ['log', 'warn', 'error', 'info'];
+                
+                methods.forEach(method => {
+                    this.originalConsole[method] = console[method];
+                    console[method] = (...args) => {
+                        this.originalConsole[method](...args);
+                        this.captureConsoleOutput(method, args);
+                    };
+                });
+            }
+
+            /**
+             * Capture console output and display in UI
+             */
+            captureConsoleOutput(level, args) {
+                const message = args.map(arg => 
+                    typeof arg === 'object' ? JSON.stringify(arg, null, 2) : String(arg)
+                ).join(' ');
+
+                this.consoleBuffer.push({
+                    level,
+                    message,
+                    timestamp: new Date().toISOString()
+                });
+
+                this.updateConsoleDisplay();
+            }
+
+            /**
+             * Update console display in UI
+             */
+            updateConsoleDisplay() {
+                const consoleOutput = document.getElementById('consoleOutput');
+                const consoleLines = document.getElementById('consoleLines');
+                
+                consoleOutput.style.display = 'block';
+                consoleLines.innerHTML = this.consoleBuffer
+                    .slice(-100) // Keep last 100 lines
+                    .map(entry => `
+                        <div class="console-line console-${entry.level}">
+                            <span class="console-timestamp">[${new Date(entry.timestamp).toLocaleTimeString()}]</span>
+                            <span class="console-message">${this.escapeHtml(entry.message)}</span>
+                        </div>
+                    `).join('');
+
+                consoleLines.scrollTop = consoleLines.scrollHeight;
+            }
+
+            /**
+             * Load test suites (mock implementation for demonstration)
+             */
+            loadTestSuites() {
+                // Mock test suites for demonstration
+                const mockSuites = [
+                    {
+                        name: 'Game Engine Tests',
+                        tests: [
+                            { name: 'should initialize game engine', status: 'pending' },
+                            { name: 'should handle game loop', status: 'pending' },
+                            { name: 'should manage game states', status: 'pending' }
+                        ]
+                    },
+                    {
+                        name: 'Player Entity Tests',
+                        tests: [
+                            { name: 'should create player with default properties', status: 'pending' },
+                            { name: 'should handle player movement', status: 'pending' },
+                            { name: 'should handle player shooting', status: 'pending' }
+                        ]
+                    },
+                    {
+                        name: 'Enemy AI Tests',
+                        tests: [
+                            { name: 'should create enemy formations', status: 'pending' },
+                            { name: 'should handle enemy movement patterns', status: 'pending' },
+                            { name: 'should handle enemy shooting', status: 'pending' }
+                        ]
+                    },
+                    {
+                        name: 'Collision System Tests',
+                        tests: [
+                            { name: 'should detect bullet-enemy collisions', status: 'pending' },
+                            { name: 'should detect player-enemy collisions', status: 'pending' },
+                            { name: 'should handle collision responses', status: 'pending' }
+                        ]
+                    }
+                ];
+
+                mockSuites.forEach(suite => {
+                    this.testSuites.set(suite.name, suite);
+                });
+
+                this.updateTestDisplay();
+                this.updateStats();
+            }
+
+            /**
+             * Run all test suites
+             */
+            async runAllTests() {
+                if (this.isRunning) return;
+
+                this.isRunning = true;
+                this.setRunningState(true);
+                this.clearConsole();
+
+                const startTime = performance.now();
+                let totalTests = 0;
+                let passedTests = 0;
+                let failedTests = 0;
+
+                console.log('🚀 Starting test execution...');
+
+                for (const [suiteName, suite] of this.testSuites) {
+                    console.log(`\n📦 Running suite: ${suiteName}`);
+                    
+                    const suiteResult = await this.runTestSuite(suite);
+                    totalTests += suiteResult.total;
+                    passedTests += suiteResult.passed;
+                    failedTests += suiteResult.failed;
+
+                    this.updateProgress(totalTests, this.getTotalTestCount());
+                }
+
+                const duration = performance.now() - startTime;
+
+                this.results = {
+                    total: totalTests,
+                    passed: passedTests,
+                    failed: failedTests,
+                    duration: Math.round(duration),
+                    suites: Array.from(this.testSuites.values())
+                };
+
+                console.log(`\n✅ Test execution completed in ${duration.toFixed(2)}ms`);
+                console.log(`📊 Results: ${passedTests} passed, ${failedTests} failed, ${totalTests} total`);
+
+                this.updateStats();
+                this.updateTestDisplay();
+                this.setRunningState(false);
+                this.isRunning = false;
+            }
+
+            /**
+             * Run a single test suite
+             */
+            async runTestSuite(suite) {
+                let passed = 0;
+                let failed = 0;
+
+                for (const test of suite.tests) {
+                    test.status = 'running';
+                    this.updateTestDisplay();
+
+                    // Simulate test execution
+                    await this.delay(Math.random() * 500 + 200);
+
+                    // Mock test result (80% pass rate for demonstration)
+                    const success = Math.random() > 0.2;
+                    
+                    if (success) {
+                        test.status = 'passed';
+                        test.duration = Math.round(Math.random() * 100 + 10);
+                        passed++;
+                        console.log(`  ✅ ${test.name} (${test.duration}ms)`);
+                    } else {
+                        test.status = 'failed';
+                        test.duration = Math.round(Math.random() * 100 + 10);
+                        test.error = this.generateMockError();
+                        failed++;
+                        console.error(`  ❌ ${test.name} (${test.duration}ms)`);
+                        console.error(`     ${test.error.message}`);
+                    }
+
+                    this.updateTestDisplay();
+                }
+
+                return { total: suite.tests.length, passed, failed };
+            }
+
+            /**
+             * Generate mock error for demonstration
+             */
+            generateMockError() {
+                const errors = [
+                    {
+                        message: 'Expected player.x to be 100, but got 95',
+                        stack: 'AssertionError: Expected player.x to be 100, but got 95\n    at test (player.test.js:25:12)\n    at runTest (test-runner.js:150:8)'
+                    },
+                    {
+                        message: 'Cannot read property "shoot" of undefined',
+                        stack: 'TypeError: Cannot read property "shoot" of undefined\n    at test (enemy.test.js:42:18)\n    at runTest (test-runner.js:150:8)'
+                    },
+                    {
+                        message: 'Timeout: Test exceeded 5000ms',
+                        stack: 'TimeoutError: Test exceeded 5000ms\n    at timeout (collision.test.js:15:10)\n    at runTest (test-runner.js:150:8)'
+                    }
+                ];
+
+                return errors[Math.floor(Math.random() * errors.length)];
+            }
+
+            /**
+             * Run selected test suites
+             */
+            async runSelectedTests() {
+                // For now, just run all tests
+                // In a real implementation, this would run only selected suites
+                await this.runAllTests();
+            }
+
+            /**
+             * Clear test results
+             */
+            clearResults() {
+                this.testSuites.forEach(suite => {
+                    suite.tests.forEach(test => {
+                        test.status = 'pending';
+                        delete test.duration;
+                        delete test.error;
+                    });
+                });
+
+                this.results = {
+                    total: 0,
+                    passed: 0,
+                    failed: 0,
+                    duration: 0,
+                    suites: []
+                };
+
+                this.clearConsole();
+                this.updateStats();
+                this.updateTestDisplay();
+                this.updateProgress(0, 100);
+
+                console.log('🧹 Test results cleared');
+            }
+
+            /**
+             * Clear console output
+             */
+            clearConsole() {
+                this.consoleBuffer = [];
+                const consoleOutput = document.getElementById('consoleOutput');
+                consoleOutput.style.display = 'none';
+            }
+
+            /**
+             * Export test results
+             */
+            exportResults() {
+                const exportData = {
+                    timestamp: new Date().toISOString(),
+                    results: this.results,
+                    environment: {
+                        userAgent: navigator.userAgent,
+                        url: window.location.href,
+                        viewport: {
+                            width: window.innerWidth,
+                            height: window.innerHeight
+                        }
+                    }
+                };
+
+                const blob = new Blob([JSON.stringify(exportData, null, 2)], {
+                    type: 'application/json'
+                });
+
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `test-results-${new Date().toISOString().slice(0, 19)}.json`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+
+                console.log('📄 Test results exported');
+            }
+
+            /**
+             * Update statistics display
+             */
+            updateStats() {
+                document.getElementById('totalTests').textContent = this.results.total;
+                document.getElementById('passedTests').textContent = this.results.passed;
+                document.getElementById('failedTests').textContent = this.results.failed;
+                document.getElementById('testDuration').textContent = `${this.results.duration}ms`;
+            }
+
+            /**
+             * Update test display
+             */
+            updateTestDisplay() {
+                const testResults = document.getElementById('testResults');
+                
+                testResults.innerHTML = Array.from(this.testSuites.entries()).map(([suiteName, suite]) => {
+                    const passedCount = suite.tests.filter(t => t.status === 'passed').length;
+                    const failedCount = suite.tests.filter(t => t.status === 'failed').length;
+                    const runningCount = suite.tests.filter(t => t.status === 'running').length;
+                    
+                    let suiteStatus = 'pending';
+                    if (runningCount > 0) suiteStatus = 'running';
+                    else if (failedCount > 0) suiteStatus = 'failed';
+                    else if (passedCount === suite.tests.length) suiteStatus = 'passed';
+
+                    return `
+                        <div class="test-suite">
+                            <div class="suite-header" onclick="this.parentElement.querySelector('.test-cases').classList.toggle('expanded')" tabindex="0" role="button" aria-expanded="false">
+                                <span class="suite-title">${this.escapeHtml(suiteName)} (${passedCount}/${suite.tests.length})</span>
+                                <span class="suite-status status-${suiteStatus}">${suiteStatus}</span>
+                            </div>
+                            <div class="test-cases">
+                                ${suite.tests.map(test => `
+                                    <div class="test-case">
+                                        <span class="test-name">
+                                            ${this.getStatusIcon(test.status)} ${this.escapeHtml(test.name)}
+                                        </span>
+                                        ${test.duration ? `<span class="test-duration">${test.duration}ms</span>` : ''}
+                                    </div>
+                                    ${test.error ? `
+                                        <div class="error-details">
+                                            <strong>Error:</strong> ${this.escapeHtml(test.error.message)}
+                                            <br><br>
+                                            <strong>Stack:</strong>
+                                            ${this.escapeHtml(test.error.stack)}
+                                        </div>
+                                    ` : ''}
+                                `).join('')}
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            }
+
+            /**
+             * Get status icon for test
+             */
+            getStatusIcon(status) {
+                const icons = {
+                    pending: '⏳',
+                    running: '🔄',
+                    passed: '✅',
+                    failed: '❌'
+                };
+                return icons[status] || '❓';
+            }
+
+            /**
+             * Update progress bar
+             */
+            updateProgress(current, total) {
+                const percentage = total > 0 ? (current / total) * 100 : 0;
+                document.getElementById('progressFill').style.width = `${percentage}%`;
+            }
+
+            /**
+             * Set running state UI
+             */
+            setRunningState(running) {
+                const runAllBtn = document.getElementById('runAllBtn');
+                const runAllText = document.getElementById('runAllText');
+                const runAllLoader = document.getElementById('runAllLoader');
+
+                runAllBtn.disabled = running;
+                runAllText.style.display = running ? 'none' : 'inline';
+                runAllLoader.style.display = running ? 'inline-block' : 'none';
+            }
+
+            /**
+             * Get total test count
+             */
+            getTotalTestCount() {
+                return Array.from(this.testSuites.values())
+                    .reduce((total, suite) => total + suite.tests.length, 0);
+            }
+
+            /**
+             * Escape HTML to prevent XSS
+             */
+            escapeHtml(text) {
+                const div = document.createElement('div');
+                div.textContent = text;
+                return div.innerHTML;
+            }
+
+            /**
+             * Utility delay function
+             */
+            delay(ms) {
+                return new Promise(resolve => setTimeout(resolve, ms));
+            }
+        }
+
+        // Initialize test runner when DOM is loaded
+        document.addEventListener('DOMContentLoaded', () => {
+            window.testRunner = new TestRunner();
+            
+            // Add accessibility improvements
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    const target = e.target;
+                    if (target.classList.contains('suite-header')) {
+                        e.preventDefault();
+                        target.click();
+                        target.setAttribute('aria-expanded', 
+                            target.parentElement.querySelector('.test-cases').classList.contains('expanded')
+                        );
+                    }
+                }
+            });
+
+            console.log('🎮 Space Invaders Test Runner initialized');
+            console.log('📋 Use Ctrl+Enter to run all tests, Ctrl+R to clear results');
+        });
+
+        // Service Worker registration for offline capability
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/sw.js')
+                    .then(registration => {
+                        console.log('SW registered: ', registration);
+                    })
+                    .catch(registrationError => {
+                        console.log('SW registration failed: ', registrationError);
+                    });
+            });
+        }
+    </script>
+</body>
+</html>
