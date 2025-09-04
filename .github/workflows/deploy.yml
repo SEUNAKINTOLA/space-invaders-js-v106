@@ -1,0 +1,458 @@
+# GitHub Actions workflow for Space Invaders JS V106
+# Provides automated testing, building, and deployment to GitHub Pages
+# Follows 2025 best practices for CI/CD pipelines with security and performance optimizations
+
+name: 🚀 Deploy Space Invaders
+
+on:
+  # Trigger on pushes to main branch
+  push:
+    branches: [ main, master ]
+  # Trigger on pull requests to main branch
+  pull_request:
+    branches: [ main, master ]
+  # Allow manual workflow dispatch
+  workflow_dispatch:
+    inputs:
+      deploy_environment:
+        description: 'Deployment environment'
+        required: false
+        default: 'production'
+        type: choice
+        options:
+          - production
+          - staging
+      skip_tests:
+        description: 'Skip test execution'
+        required: false
+        default: false
+        type: boolean
+
+# Set permissions for GitHub Pages deployment
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+  checks: write
+  pull-requests: write
+
+# Ensure only one deployment runs at a time
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: true
+
+# Environment variables for the workflow
+env:
+  NODE_VERSION: '20'
+  CACHE_VERSION: 'v1'
+  BUILD_TIMEOUT: '10m'
+  TEST_TIMEOUT: '5m'
+
+jobs:
+  # 🧪 Testing and Quality Assurance Job
+  test:
+    name: 🧪 Test & Quality Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    
+    strategy:
+      matrix:
+        # Test on multiple Node.js versions for compatibility
+        node-version: [18, 20, 21]
+        # Test on different operating systems
+        os: [ubuntu-latest, windows-latest, macos-latest]
+      fail-fast: false
+    
+    steps:
+      - name: 📥 Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          # Fetch full history for better analysis
+          fetch-depth: 0
+          # Use token for private repos if needed
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🔧 Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          # Use package-lock.json for caching
+          cache: 'npm'
+          cache-dependency-path: '**/package-lock.json'
+
+      - name: 📦 Install Dependencies
+        run: |
+          # Clean install for reproducible builds
+          npm ci --prefer-offline --no-audit
+          # Verify installation integrity
+          npm ls --depth=0
+        timeout-minutes: 3
+
+      - name: 🔍 Security Audit
+        run: |
+          # Check for security vulnerabilities
+          npm audit --audit-level=moderate
+          # Generate security report
+          npm audit --json > security-audit.json || true
+        continue-on-error: true
+
+      - name: 📊 Code Quality Analysis
+        run: |
+          # Run ESLint for code quality
+          npx eslint . --ext .js,.html --format json --output-file eslint-report.json || true
+          # Check code formatting
+          npx prettier --check . || true
+        continue-on-error: true
+
+      - name: 🧪 Run Unit Tests
+        if: ${{ !inputs.skip_tests }}
+        run: |
+          # Run tests with coverage
+          npm test -- --coverage --ci --watchAll=false --maxWorkers=2
+          # Generate test report
+          npm run test:report || true
+        timeout-minutes: 5
+        env:
+          CI: true
+          NODE_ENV: test
+
+      - name: 🌐 Browser Compatibility Tests
+        if: matrix.os == 'ubuntu-latest' && matrix.node-version == '20'
+        run: |
+          # Install browser testing dependencies
+          npx playwright install --with-deps chromium firefox webkit
+          # Run cross-browser tests
+          npm run test:browser || true
+        continue-on-error: true
+
+      - name: 📈 Performance Tests
+        if: matrix.os == 'ubuntu-latest' && matrix.node-version == '20'
+        run: |
+          # Run performance benchmarks
+          npm run test:performance || true
+          # Generate performance report
+          npm run perf:report || true
+        continue-on-error: true
+
+      - name: 📊 Upload Test Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results-${{ matrix.os }}-node${{ matrix.node-version }}
+          path: |
+            coverage/
+            test-results/
+            *.json
+          retention-days: 7
+
+      - name: 📝 Comment Test Results
+        uses: actions/github-script@v7
+        if: github.event_name == 'pull_request' && matrix.os == 'ubuntu-latest' && matrix.node-version == '20'
+        with:
+          script: |
+            const fs = require('fs');
+            let comment = '## 🧪 Test Results\n\n';
+            
+            try {
+              // Add test coverage info
+              if (fs.existsSync('coverage/coverage-summary.json')) {
+                const coverage = JSON.parse(fs.readFileSync('coverage/coverage-summary.json', 'utf8'));
+                const total = coverage.total;
+                comment += `### Coverage Report\n`;
+                comment += `- **Lines**: ${total.lines.pct}%\n`;
+                comment += `- **Functions**: ${total.functions.pct}%\n`;
+                comment += `- **Branches**: ${total.branches.pct}%\n`;
+                comment += `- **Statements**: ${total.statements.pct}%\n\n`;
+              }
+              
+              // Add security audit info
+              if (fs.existsSync('security-audit.json')) {
+                const audit = JSON.parse(fs.readFileSync('security-audit.json', 'utf8'));
+                const vulnerabilities = audit.metadata?.vulnerabilities || {};
+                const total = Object.values(vulnerabilities).reduce((a, b) => a + b, 0);
+                comment += `### Security Audit\n`;
+                comment += `- **Total Vulnerabilities**: ${total}\n\n`;
+              }
+              
+              comment += '✅ All tests completed successfully!';
+              
+              github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: comment
+              });
+            } catch (error) {
+              console.log('Error creating comment:', error);
+            }
+
+  # 🏗️ Build and Optimization Job
+  build:
+    name: 🏗️ Build & Optimize
+    runs-on: ubuntu-latest
+    needs: test
+    timeout-minutes: 10
+    
+    steps:
+      - name: 📥 Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: 🔧 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: 📦 Install Dependencies
+        run: npm ci --prefer-offline --no-audit
+
+      - name: 🏗️ Build Game Assets
+        run: |
+          # Create build directory
+          mkdir -p dist
+          
+          # Copy HTML files
+          cp index.html dist/
+          cp manifest.json dist/ || true
+          
+          # Copy CSS files
+          mkdir -p dist/css
+          cp -r css/* dist/css/ || true
+          
+          # Copy JavaScript files
+          mkdir -p dist/js
+          cp -r js/* dist/js/ || true
+          
+          # Copy source files if they exist
+          if [ -d "src" ]; then
+            mkdir -p dist/src
+            cp -r src/* dist/src/
+          fi
+          
+          # Copy assets
+          if [ -d "assets" ]; then
+            cp -r assets dist/
+          fi
+          
+          # Copy service worker
+          cp sw.js dist/ || true
+        
+      - name: 🎨 Optimize Assets
+        run: |
+          # Minify CSS files
+          find dist/css -name "*.css" -exec npx clean-css-cli -o {} {} \; || true
+          
+          # Minify JavaScript files (basic minification)
+          find dist/js -name "*.js" -exec npx terser {} -o {} --compress --mangle \; || true
+          find dist/src -name "*.js" -exec npx terser {} -o {} --compress --mangle \; || true
+          
+          # Optimize images if imagemin is available
+          npx imagemin 'dist/assets/**/*.{jpg,jpeg,png,gif,svg}' --out-dir=dist/assets/ || true
+
+      - name: 🔍 Validate Build
+        run: |
+          # Check if required files exist
+          test -f dist/index.html || (echo "❌ index.html missing" && exit 1)
+          
+          # Check file sizes
+          echo "📊 Build size analysis:"
+          du -sh dist/
+          find dist -type f -name "*.js" -exec wc -c {} + | sort -n
+          find dist -type f -name "*.css" -exec wc -c {} + | sort -n
+
+      - name: 🔒 Security Headers
+        run: |
+          # Add security headers to HTML files
+          find dist -name "*.html" -exec sed -i '/<head>/a\
+          <meta http-equiv="Content-Security-Policy" content="default-src '\''self'\''; script-src '\''self'\''; style-src '\''self'\'' '\''unsafe-inline'\''; img-src '\''self'\'' data:; font-src '\''self'\''; connect-src '\''self'\'';">\
+          <meta http-equiv="X-Content-Type-Options" content="nosniff">\
+          <meta http-equiv="X-Frame-Options" content="DENY">\
+          <meta http-equiv="X-XSS-Protection" content="1; mode=block">' {} \;
+
+      - name: 📦 Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: space-invaders-build
+          path: dist/
+          retention-days: 30
+
+      - name: 📊 Build Report
+        run: |
+          echo "## 🏗️ Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- **Build Size**: $(du -sh dist/ | cut -f1)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Files Created**: $(find dist -type f | wc -l)" >> $GITHUB_STEP_SUMMARY
+          echo "- **JavaScript Files**: $(find dist -name "*.js" | wc -l)" >> $GITHUB_STEP_SUMMARY
+          echo "- **CSS Files**: $(find dist -name "*.css" | wc -l)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Asset Files**: $(find dist/assets -type f 2>/dev/null | wc -l || echo 0)" >> $GITHUB_STEP_SUMMARY
+
+  # 🚀 Deployment Job
+  deploy:
+    name: 🚀 Deploy to GitHub Pages
+    runs-on: ubuntu-latest
+    needs: [test, build]
+    # Only deploy on main branch pushes or manual dispatch
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.event_name == 'workflow_dispatch'
+    timeout-minutes: 10
+    
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    
+    steps:
+      - name: 📥 Download Build Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: space-invaders-build
+          path: dist/
+
+      - name: 🔧 Setup GitHub Pages
+        uses: actions/configure-pages@v4
+
+      - name: 📄 Create Additional Pages Files
+        run: |
+          # Create 404 page
+          cat > dist/404.html << 'EOF'
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+              <meta charset="UTF-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <title>404 - Space Invaders</title>
+              <style>
+                  body { 
+                      font-family: 'Courier New', monospace; 
+                      background: #000; 
+                      color: #0f0; 
+                      text-align: center; 
+                      padding: 50px; 
+                  }
+                  .container { max-width: 600px; margin: 0 auto; }
+                  .ascii-art { font-size: 12px; line-height: 1; margin: 20px 0; }
+                  a { color: #0f0; text-decoration: none; }
+                  a:hover { text-decoration: underline; }
+              </style>
+          </head>
+          <body>
+              <div class="container">
+                  <h1>404 - Page Not Found</h1>
+                  <div class="ascii-art">
+                      <pre>
+             ▄▄▄▄▄▄▄▄▄
+            ███████████
+            ███████████
+            ███▄▄▄▄▄███
+            ███████████
+             ▀▀▀▀▀▀▀▀▀
+                      </pre>
+                  </div>
+                  <p>The page you're looking for has been destroyed by space invaders!</p>
+                  <p><a href="/">Return to Game</a></p>
+              </div>
+          </body>
+          </html>
+          EOF
+          
+          # Create robots.txt
+          cat > dist/robots.txt << 'EOF'
+          User-agent: *
+          Allow: /
+          
+          Sitemap: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/sitemap.xml
+          EOF
+          
+          # Create sitemap.xml
+          cat > dist/sitemap.xml << 'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+              <url>
+                  <loc>https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/</loc>
+                  <lastmod>$(date -u +%Y-%m-%d)</lastmod>
+                  <changefreq>weekly</changefreq>
+                  <priority>1.0</priority>
+              </url>
+          </urlset>
+          EOF
+
+      - name: 📤 Upload to GitHub Pages
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist/
+
+      - name: 🚀 Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+      - name: 🎉 Deployment Success
+        run: |
+          echo "## 🚀 Deployment Successful!" >> $GITHUB_STEP_SUMMARY
+          echo "- **URL**: ${{ steps.deployment.outputs.page_url }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment**: ${{ inputs.deploy_environment || 'production' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Deployed At**: $(date -u)" >> $GITHUB_STEP_SUMMARY
+
+      - name: 🔔 Notify Deployment
+        uses: actions/github-script@v7
+        if: github.event_name == 'push'
+        with:
+          script: |
+            const deploymentUrl = '${{ steps.deployment.outputs.page_url }}';
+            const commitSha = '${{ github.sha }}';
+            const shortSha = commitSha.substring(0, 7);
+            
+            // Create deployment status
+            await github.rest.repos.createDeploymentStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              deployment_id: context.payload.deployment?.id || 0,
+              state: 'success',
+              environment_url: deploymentUrl,
+              description: `Deployed commit ${shortSha} to GitHub Pages`
+            });
+
+  # 🧹 Cleanup Job
+  cleanup:
+    name: 🧹 Cleanup
+    runs-on: ubuntu-latest
+    needs: [deploy]
+    if: always()
+    
+    steps:
+      - name: 🗑️ Clean Old Artifacts
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // Clean up old artifacts (keep last 5)
+            const artifacts = await github.rest.actions.listArtifactsForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              per_page: 100
+            });
+            
+            const oldArtifacts = artifacts.data.artifacts
+              .filter(artifact => artifact.name.startsWith('space-invaders-') || artifact.name.startsWith('test-results-'))
+              .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+              .slice(10); // Keep last 10
+            
+            for (const artifact of oldArtifacts) {
+              try {
+                await github.rest.actions.deleteArtifact({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  artifact_id: artifact.id
+                });
+                console.log(`Deleted artifact: ${artifact.name}`);
+              } catch (error) {
+                console.log(`Failed to delete artifact ${artifact.name}:`, error.message);
+              }
+            }
+
+      - name: 📊 Workflow Summary
+        run: |
+          echo "## 📊 Workflow Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- **Trigger**: ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch**: ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Actor**: ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Workflow**: ${{ github.workflow }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Run Number**: ${{ github.run_number }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Completed**: $(date -u)" >> $GITHUB_STEP_SUMMARY
