@@ -1,20 +1,23 @@
 /**
  * Space Invaders Game - Main Game Module
  * 
- * This module implements the core game logic with a comprehensive keyboard input system
- * featuring key mapping, input buffering, and responsive controls for player movement
- * and actions. The architecture follows clean separation of concerns with modular
- * components for input handling, game state management, and rendering.
+ * This module implements the core game loop, player entity management,
+ * sprite rendering system, and input handling for a Space Invaders game.
+ * 
+ * Architecture:
+ * - Entity-Component pattern for game objects
+ * - State management for game phases
+ * - Event-driven input system
+ * - Canvas-based rendering pipeline
  * 
  * Key Features:
- * - Responsive keyboard input with customizable key mappings
- * - Input buffering for smooth gameplay
- * - Modular game state management
- * - Performance monitoring and error handling
- * - Canvas-based rendering system
+ * - Player ship with movement and shooting
+ * - Sprite-based rendering system
+ * - Collision detection
+ * - Game state management
+ * - Performance monitoring
  * 
- * Dependencies: None (self-contained implementation)
- * Browser Compatibility: Modern browsers with Canvas API support
+ * Dependencies: None (uses only browser APIs)
  * 
  * @author Space Invaders Development Team
  * @version 1.0.6
@@ -22,1115 +25,1116 @@
 
 'use strict';
 
-// ============================================================================
-// CONSTANTS AND CONFIGURATION
-// ============================================================================
-
-const GAME_CONFIG = {
-    canvas: {
-        width: 800,
-        height: 600,
-        backgroundColor: '#000000'
-    },
-    player: {
-        width: 40,
-        height: 30,
-        speed: 5,
-        color: '#00FF00',
-        startX: 380,
-        startY: 550
-    },
-    input: {
-        bufferSize: 10,
-        keyRepeatDelay: 150,
-        keyRepeatRate: 50
-    },
-    performance: {
-        targetFPS: 60,
-        maxFrameTime: 16.67 // ~60 FPS
-    }
-};
-
-const KEY_MAPPINGS = {
-    // Movement keys
-    MOVE_LEFT: ['ArrowLeft', 'KeyA'],
-    MOVE_RIGHT: ['ArrowRight', 'KeyD'],
-    MOVE_UP: ['ArrowUp', 'KeyW'],
-    MOVE_DOWN: ['ArrowDown', 'KeyS'],
-    
-    // Action keys
-    SHOOT: ['Space', 'Enter'],
-    PAUSE: ['KeyP', 'Escape'],
-    
-    // System keys
-    RESTART: ['KeyR'],
-    MUTE: ['KeyM']
-};
-
-const GAME_STATES = {
-    LOADING: 'loading',
-    MENU: 'menu',
-    PLAYING: 'playing',
-    PAUSED: 'paused',
-    GAME_OVER: 'game_over'
-};
-
-// ============================================================================
-// UTILITY CLASSES
-// ============================================================================
-
 /**
  * Vector2D utility class for position and movement calculations
  */
 class Vector2D {
+    /**
+     * @param {number} x - X coordinate
+     * @param {number} y - Y coordinate
+     */
     constructor(x = 0, y = 0) {
         this.x = x;
         this.y = y;
     }
 
-    add(vector) {
-        return new Vector2D(this.x + vector.x, this.y + vector.y);
+    /**
+     * Add another vector to this vector
+     * @param {Vector2D} other - Vector to add
+     * @returns {Vector2D} New vector result
+     */
+    add(other) {
+        return new Vector2D(this.x + other.x, this.y + other.y);
     }
 
+    /**
+     * Multiply vector by scalar
+     * @param {number} scalar - Multiplication factor
+     * @returns {Vector2D} New vector result
+     */
     multiply(scalar) {
         return new Vector2D(this.x * scalar, this.y * scalar);
     }
 
-    normalize() {
-        const magnitude = Math.sqrt(this.x * this.x + this.y * this.y);
-        if (magnitude === 0) return new Vector2D(0, 0);
-        return new Vector2D(this.x / magnitude, this.y / magnitude);
+    /**
+     * Get distance to another vector
+     * @param {Vector2D} other - Target vector
+     * @returns {number} Distance
+     */
+    distanceTo(other) {
+        const dx = this.x - other.x;
+        const dy = this.y - other.y;
+        return Math.sqrt(dx * dx + dy * dy);
     }
 
+    /**
+     * Clone this vector
+     * @returns {Vector2D} New vector copy
+     */
     clone() {
         return new Vector2D(this.x, this.y);
     }
 }
 
 /**
- * Performance monitor for tracking game performance metrics
+ * Game constants and configuration
  */
-class PerformanceMonitor {
-    constructor() {
-        this.frameCount = 0;
-        this.lastTime = 0;
-        this.fps = 0;
-        this.frameTime = 0;
-        this.metrics = {
-            averageFPS: 0,
-            minFPS: Infinity,
-            maxFPS: 0,
-            frameTimeHistory: []
-        };
+const GAME_CONFIG = {
+    CANVAS: {
+        WIDTH: 800,
+        HEIGHT: 600,
+        BACKGROUND_COLOR: '#000011'
+    },
+    PLAYER: {
+        WIDTH: 32,
+        HEIGHT: 32,
+        SPEED: 300, // pixels per second
+        COLOR: '#00FF00',
+        START_X: 400,
+        START_Y: 550
+    },
+    PROJECTILE: {
+        WIDTH: 4,
+        HEIGHT: 12,
+        SPEED: 400,
+        COLOR: '#FFFF00',
+        COOLDOWN: 200 // milliseconds
+    },
+    ENEMY: {
+        WIDTH: 24,
+        HEIGHT: 24,
+        SPEED: 50,
+        COLOR: '#FF0000',
+        SPAWN_RATE: 2000 // milliseconds
+    },
+    PERFORMANCE: {
+        TARGET_FPS: 60,
+        FRAME_TIME: 1000 / 60
     }
-
-    update(currentTime) {
-        this.frameCount++;
-        this.frameTime = currentTime - this.lastTime;
-        
-        if (this.frameTime > 0) {
-            this.fps = 1000 / this.frameTime;
-            this.updateMetrics();
-        }
-        
-        this.lastTime = currentTime;
-    }
-
-    updateMetrics() {
-        this.metrics.minFPS = Math.min(this.metrics.minFPS, this.fps);
-        this.metrics.maxFPS = Math.max(this.metrics.maxFPS, this.fps);
-        
-        this.metrics.frameTimeHistory.push(this.frameTime);
-        if (this.metrics.frameTimeHistory.length > 60) {
-            this.metrics.frameTimeHistory.shift();
-        }
-        
-        const avgFrameTime = this.metrics.frameTimeHistory.reduce((a, b) => a + b, 0) / 
-                           this.metrics.frameTimeHistory.length;
-        this.metrics.averageFPS = 1000 / avgFrameTime;
-    }
-
-    getMetrics() {
-        return {
-            currentFPS: Math.round(this.fps),
-            averageFPS: Math.round(this.metrics.averageFPS),
-            minFPS: Math.round(this.metrics.minFPS),
-            maxFPS: Math.round(this.metrics.maxFPS),
-            frameTime: Math.round(this.frameTime * 100) / 100
-        };
-    }
-}
+};
 
 /**
- * Logger utility for structured logging with different levels
- */
-class Logger {
-    constructor(context = 'Game') {
-        this.context = context;
-        this.levels = {
-            DEBUG: 0,
-            INFO: 1,
-            WARN: 2,
-            ERROR: 3
-        };
-        this.currentLevel = this.levels.INFO;
-    }
-
-    debug(message, data = null) {
-        this.log('DEBUG', message, data);
-    }
-
-    info(message, data = null) {
-        this.log('INFO', message, data);
-    }
-
-    warn(message, data = null) {
-        this.log('WARN', message, data);
-    }
-
-    error(message, error = null) {
-        this.log('ERROR', message, error);
-    }
-
-    log(level, message, data) {
-        if (this.levels[level] < this.currentLevel) return;
-
-        const timestamp = new Date().toISOString();
-        const logEntry = {
-            timestamp,
-            level,
-            context: this.context,
-            message,
-            data
-        };
-
-        console.log(`[${timestamp}] ${level} [${this.context}] ${message}`, data || '');
-    }
-}
-
-// ============================================================================
-// INPUT SYSTEM
-// ============================================================================
-
-/**
- * Comprehensive keyboard input manager with buffering and key mapping
+ * Input manager for handling keyboard and touch events
  */
 class InputManager {
     constructor() {
-        this.logger = new Logger('InputManager');
-        this.keyStates = new Map();
-        this.keyBuffer = [];
-        this.keyMappings = new Map();
-        this.listeners = new Map();
-        this.isEnabled = true;
+        this.keys = new Set();
+        this.touchActive = false;
+        this.touchPosition = new Vector2D();
+        this.callbacks = new Map();
         
-        this.initializeKeyMappings();
-        this.bindEventListeners();
-        
-        this.logger.info('InputManager initialized');
+        this._setupEventListeners();
+        this._logInfo('InputManager initialized');
     }
 
     /**
-     * Initialize key mappings from configuration
+     * Setup keyboard and touch event listeners
+     * @private
      */
-    initializeKeyMappings() {
-        for (const [action, keys] of Object.entries(KEY_MAPPINGS)) {
-            this.keyMappings.set(action, keys);
+    _setupEventListeners() {
+        try {
+            // Keyboard events
+            document.addEventListener('keydown', (e) => this._handleKeyDown(e));
+            document.addEventListener('keyup', (e) => this._handleKeyUp(e));
+            
+            // Touch events for mobile support
+            document.addEventListener('touchstart', (e) => this._handleTouchStart(e));
+            document.addEventListener('touchmove', (e) => this._handleTouchMove(e));
+            document.addEventListener('touchend', (e) => this._handleTouchEnd(e));
+            
+            // Prevent context menu on right click
+            document.addEventListener('contextmenu', (e) => e.preventDefault());
+            
+        } catch (error) {
+            this._logError('Failed to setup event listeners', error);
         }
-    }
-
-    /**
-     * Bind keyboard event listeners
-     */
-    bindEventListeners() {
-        document.addEventListener('keydown', this.handleKeyDown.bind(this));
-        document.addEventListener('keyup', this.handleKeyUp.bind(this));
-        
-        // Prevent default behavior for game keys
-        document.addEventListener('keydown', (event) => {
-            if (this.isGameKey(event.code)) {
-                event.preventDefault();
-            }
-        });
     }
 
     /**
      * Handle keydown events
-     * @param {KeyboardEvent} event - The keyboard event
+     * @private
+     * @param {KeyboardEvent} event - Keyboard event
      */
-    handleKeyDown(event) {
-        if (!this.isEnabled) return;
-
-        const keyCode = event.code;
-        const currentTime = Date.now();
-
-        // Update key state
-        if (!this.keyStates.has(keyCode)) {
-            this.keyStates.set(keyCode, {
-                pressed: true,
-                justPressed: true,
-                pressTime: currentTime,
-                repeatTime: currentTime + GAME_CONFIG.input.keyRepeatDelay
+    _handleKeyDown(event) {
+        const key = event.code.toLowerCase();
+        this.keys.add(key);
+        
+        // Trigger callbacks for specific keys
+        if (this.callbacks.has(key)) {
+            this.callbacks.get(key).forEach(callback => {
+                try {
+                    callback('down', event);
+                } catch (error) {
+                    this._logError(`Callback error for key ${key}`, error);
+                }
             });
-
-            // Add to buffer
-            this.addToBuffer(keyCode);
-            
-            // Trigger action listeners
-            this.triggerActionListeners(keyCode, 'keydown');
-        } else {
-            const keyState = this.keyStates.get(keyCode);
-            keyState.pressed = true;
-            
-            // Handle key repeat
-            if (currentTime >= keyState.repeatTime) {
-                this.addToBuffer(keyCode);
-                keyState.repeatTime = currentTime + GAME_CONFIG.input.keyRepeatRate;
-                this.triggerActionListeners(keyCode, 'repeat');
-            }
+        }
+        
+        // Prevent default for game keys
+        if (['space', 'arrowleft', 'arrowright', 'arrowup', 'arrowdown'].includes(key)) {
+            event.preventDefault();
         }
     }
 
     /**
      * Handle keyup events
-     * @param {KeyboardEvent} event - The keyboard event
+     * @private
+     * @param {KeyboardEvent} event - Keyboard event
      */
-    handleKeyUp(event) {
-        if (!this.isEnabled) return;
-
-        const keyCode = event.code;
+    _handleKeyUp(event) {
+        const key = event.code.toLowerCase();
+        this.keys.delete(key);
         
-        if (this.keyStates.has(keyCode)) {
-            const keyState = this.keyStates.get(keyCode);
-            keyState.pressed = false;
-            keyState.justPressed = false;
-            
-            this.triggerActionListeners(keyCode, 'keyup');
+        if (this.callbacks.has(key)) {
+            this.callbacks.get(key).forEach(callback => {
+                try {
+                    callback('up', event);
+                } catch (error) {
+                    this._logError(`Callback error for key ${key}`, error);
+                }
+            });
         }
     }
 
     /**
-     * Add key to input buffer
-     * @param {string} keyCode - The key code to add
+     * Handle touch start events
+     * @private
+     * @param {TouchEvent} event - Touch event
      */
-    addToBuffer(keyCode) {
-        this.keyBuffer.push({
-            key: keyCode,
-            timestamp: Date.now()
-        });
+    _handleTouchStart(event) {
+        event.preventDefault();
+        this.touchActive = true;
+        const touch = event.touches[0];
+        this.touchPosition.x = touch.clientX;
+        this.touchPosition.y = touch.clientY;
+    }
 
-        // Maintain buffer size
-        if (this.keyBuffer.length > GAME_CONFIG.input.bufferSize) {
-            this.keyBuffer.shift();
+    /**
+     * Handle touch move events
+     * @private
+     * @param {TouchEvent} event - Touch event
+     */
+    _handleTouchMove(event) {
+        event.preventDefault();
+        if (this.touchActive && event.touches.length > 0) {
+            const touch = event.touches[0];
+            this.touchPosition.x = touch.clientX;
+            this.touchPosition.y = touch.clientY;
         }
+    }
+
+    /**
+     * Handle touch end events
+     * @private
+     * @param {TouchEvent} event - Touch event
+     */
+    _handleTouchEnd(event) {
+        event.preventDefault();
+        this.touchActive = false;
     }
 
     /**
      * Check if a key is currently pressed
-     * @param {string} keyCode - The key code to check
+     * @param {string} key - Key code to check
      * @returns {boolean} True if key is pressed
      */
-    isKeyPressed(keyCode) {
-        const keyState = this.keyStates.get(keyCode);
-        return keyState ? keyState.pressed : false;
+    isKeyPressed(key) {
+        return this.keys.has(key.toLowerCase());
     }
 
     /**
-     * Check if a key was just pressed this frame
-     * @param {string} keyCode - The key code to check
-     * @returns {boolean} True if key was just pressed
+     * Register callback for key events
+     * @param {string} key - Key code
+     * @param {Function} callback - Callback function
      */
-    isKeyJustPressed(keyCode) {
-        const keyState = this.keyStates.get(keyCode);
-        return keyState ? keyState.justPressed : false;
-    }
-
-    /**
-     * Check if an action is currently active
-     * @param {string} action - The action name
-     * @returns {boolean} True if action is active
-     */
-    isActionPressed(action) {
-        const keys = this.keyMappings.get(action);
-        if (!keys) return false;
-
-        return keys.some(key => this.isKeyPressed(key));
-    }
-
-    /**
-     * Check if an action was just triggered
-     * @param {string} action - The action name
-     * @returns {boolean} True if action was just triggered
-     */
-    isActionJustPressed(action) {
-        const keys = this.keyMappings.get(action);
-        if (!keys) return false;
-
-        return keys.some(key => this.isKeyJustPressed(key));
-    }
-
-    /**
-     * Register a listener for specific actions
-     * @param {string} action - The action name
-     * @param {Function} callback - The callback function
-     */
-    addActionListener(action, callback) {
-        if (!this.listeners.has(action)) {
-            this.listeners.set(action, []);
+    onKey(key, callback) {
+        const keyLower = key.toLowerCase();
+        if (!this.callbacks.has(keyLower)) {
+            this.callbacks.set(keyLower, []);
         }
-        this.listeners.get(action).push(callback);
+        this.callbacks.get(keyLower).push(callback);
     }
 
     /**
-     * Trigger action listeners
-     * @param {string} keyCode - The key code
-     * @param {string} eventType - The event type
+     * Get movement vector from input
+     * @returns {Vector2D} Movement direction
      */
-    triggerActionListeners(keyCode, eventType) {
-        for (const [action, keys] of this.keyMappings.entries()) {
-            if (keys.includes(keyCode)) {
-                const listeners = this.listeners.get(action);
-                if (listeners) {
-                    listeners.forEach(callback => {
-                        try {
-                            callback(action, eventType);
-                        } catch (error) {
-                            this.logger.error(`Error in action listener for ${action}`, error);
-                        }
-                    });
-                }
-            }
+    getMovementVector() {
+        const movement = new Vector2D();
+        
+        if (this.isKeyPressed('arrowleft') || this.isKeyPressed('keya')) {
+            movement.x -= 1;
         }
-    }
-
-    /**
-     * Check if a key is a game key
-     * @param {string} keyCode - The key code
-     * @returns {boolean} True if it's a game key
-     */
-    isGameKey(keyCode) {
-        for (const keys of this.keyMappings.values()) {
-            if (keys.includes(keyCode)) {
-                return true;
-            }
+        if (this.isKeyPressed('arrowright') || this.isKeyPressed('keyd')) {
+            movement.x += 1;
         }
-        return false;
-    }
-
-    /**
-     * Clear just pressed states (call once per frame)
-     */
-    update() {
-        for (const keyState of this.keyStates.values()) {
-            keyState.justPressed = false;
+        if (this.isKeyPressed('arrowup') || this.isKeyPressed('keyw')) {
+            movement.y -= 1;
         }
-    }
-
-    /**
-     * Get input buffer and clear it
-     * @returns {Array} The input buffer
-     */
-    consumeBuffer() {
-        const buffer = [...this.keyBuffer];
-        this.keyBuffer.length = 0;
-        return buffer;
-    }
-
-    /**
-     * Enable or disable input processing
-     * @param {boolean} enabled - Whether input should be enabled
-     */
-    setEnabled(enabled) {
-        this.isEnabled = enabled;
-        if (!enabled) {
-            this.keyStates.clear();
-            this.keyBuffer.length = 0;
+        if (this.isKeyPressed('arrowdown') || this.isKeyPressed('keys')) {
+            movement.y += 1;
         }
+        
+        return movement;
+    }
+
+    /**
+     * Check if shoot action is triggered
+     * @returns {boolean} True if shooting
+     */
+    isShooting() {
+        return this.isKeyPressed('space') || this.touchActive;
+    }
+
+    /**
+     * Log info message
+     * @private
+     * @param {string} message - Message to log
+     */
+    _logInfo(message) {
+        console.log(`[InputManager] ${message}`);
+    }
+
+    /**
+     * Log error message
+     * @private
+     * @param {string} message - Error message
+     * @param {Error} error - Error object
+     */
+    _logError(message, error) {
+        console.error(`[InputManager] ${message}:`, error);
     }
 }
 
-// ============================================================================
-// GAME ENTITIES
-// ============================================================================
+/**
+ * Sprite renderer for drawing game entities
+ */
+class SpriteRenderer {
+    /**
+     * @param {CanvasRenderingContext2D} context - Canvas rendering context
+     */
+    constructor(context) {
+        this.context = context;
+        this.sprites = new Map();
+        this._logInfo('SpriteRenderer initialized');
+    }
+
+    /**
+     * Create a simple sprite from shape data
+     * @param {string} id - Sprite identifier
+     * @param {Object} config - Sprite configuration
+     */
+    createSprite(id, config) {
+        try {
+            const canvas = document.createElement('canvas');
+            canvas.width = config.width;
+            canvas.height = config.height;
+            const ctx = canvas.getContext('2d');
+            
+            // Draw based on sprite type
+            switch (config.type) {
+                case 'player':
+                    this._drawPlayerSprite(ctx, config);
+                    break;
+                case 'enemy':
+                    this._drawEnemySprite(ctx, config);
+                    break;
+                case 'projectile':
+                    this._drawProjectileSprite(ctx, config);
+                    break;
+                default:
+                    this._drawDefaultSprite(ctx, config);
+            }
+            
+            this.sprites.set(id, canvas);
+            this._logInfo(`Created sprite: ${id}`);
+            
+        } catch (error) {
+            this._logError(`Failed to create sprite ${id}`, error);
+        }
+    }
+
+    /**
+     * Draw player sprite
+     * @private
+     * @param {CanvasRenderingContext2D} ctx - Canvas context
+     * @param {Object} config - Sprite configuration
+     */
+    _drawPlayerSprite(ctx, config) {
+        const { width, height, color } = config;
+        
+        // Draw ship body
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.moveTo(width / 2, 0);
+        ctx.lineTo(width * 0.8, height);
+        ctx.lineTo(width * 0.2, height);
+        ctx.closePath();
+        ctx.fill();
+        
+        // Draw engine glow
+        ctx.fillStyle = '#0088FF';
+        ctx.fillRect(width * 0.4, height * 0.8, width * 0.2, height * 0.2);
+    }
+
+    /**
+     * Draw enemy sprite
+     * @private
+     * @param {CanvasRenderingContext2D} ctx - Canvas context
+     * @param {Object} config - Sprite configuration
+     */
+    _drawEnemySprite(ctx, config) {
+        const { width, height, color } = config;
+        
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.moveTo(width / 2, height);
+        ctx.lineTo(0, 0);
+        ctx.lineTo(width, 0);
+        ctx.closePath();
+        ctx.fill();
+        
+        // Add details
+        ctx.fillStyle = '#FFAA00';
+        ctx.fillRect(width * 0.3, height * 0.3, width * 0.4, height * 0.2);
+    }
+
+    /**
+     * Draw projectile sprite
+     * @private
+     * @param {CanvasRenderingContext2D} ctx - Canvas context
+     * @param {Object} config - Sprite configuration
+     */
+    _drawProjectileSprite(ctx, config) {
+        const { width, height, color } = config;
+        
+        ctx.fillStyle = color;
+        ctx.fillRect(0, 0, width, height);
+        
+        // Add glow effect
+        ctx.shadowColor = color;
+        ctx.shadowBlur = 4;
+        ctx.fillRect(0, 0, width, height);
+        ctx.shadowBlur = 0;
+    }
+
+    /**
+     * Draw default sprite
+     * @private
+     * @param {CanvasRenderingContext2D} ctx - Canvas context
+     * @param {Object} config - Sprite configuration
+     */
+    _drawDefaultSprite(ctx, config) {
+        const { width, height, color } = config;
+        ctx.fillStyle = color;
+        ctx.fillRect(0, 0, width, height);
+    }
+
+    /**
+     * Render a sprite at given position
+     * @param {string} spriteId - Sprite identifier
+     * @param {Vector2D} position - Position to render at
+     * @param {number} rotation - Rotation angle in radians
+     */
+    render(spriteId, position, rotation = 0) {
+        const sprite = this.sprites.get(spriteId);
+        if (!sprite) {
+            this._logError(`Sprite not found: ${spriteId}`);
+            return;
+        }
+
+        try {
+            this.context.save();
+            
+            if (rotation !== 0) {
+                this.context.translate(position.x + sprite.width / 2, position.y + sprite.height / 2);
+                this.context.rotate(rotation);
+                this.context.drawImage(sprite, -sprite.width / 2, -sprite.height / 2);
+            } else {
+                this.context.drawImage(sprite, position.x, position.y);
+            }
+            
+            this.context.restore();
+            
+        } catch (error) {
+            this._logError(`Failed to render sprite ${spriteId}`, error);
+        }
+    }
+
+    /**
+     * Log info message
+     * @private
+     * @param {string} message - Message to log
+     */
+    _logInfo(message) {
+        console.log(`[SpriteRenderer] ${message}`);
+    }
+
+    /**
+     * Log error message
+     * @private
+     * @param {string} message - Error message
+     * @param {Error} error - Error object
+     */
+    _logError(message, error) {
+        console.error(`[SpriteRenderer] ${message}:`, error);
+    }
+}
 
 /**
- * Player entity with movement and rendering
+ * Player entity class
  */
 class Player {
-    constructor(x, y) {
-        this.position = new Vector2D(x, y);
-        this.velocity = new Vector2D(0, 0);
-        this.width = GAME_CONFIG.player.width;
-        this.height = GAME_CONFIG.player.height;
-        this.speed = GAME_CONFIG.player.speed;
-        this.color = GAME_CONFIG.player.color;
+    /**
+     * @param {Vector2D} position - Initial position
+     */
+    constructor(position) {
+        this.position = position.clone();
+        this.velocity = new Vector2D();
+        this.size = new Vector2D(GAME_CONFIG.PLAYER.WIDTH, GAME_CONFIG.PLAYER.HEIGHT);
         this.health = 100;
         this.maxHealth = 100;
-        this.logger = new Logger('Player');
-    }
-
-    /**
-     * Update player state based on input
-     * @param {InputManager} inputManager - The input manager
-     * @param {number} deltaTime - Time since last update
-     */
-    update(inputManager, deltaTime) {
-        this.handleInput(inputManager);
-        this.updatePosition(deltaTime);
-        this.constrainToCanvas();
-    }
-
-    /**
-     * Handle input for player movement
-     * @param {InputManager} inputManager - The input manager
-     */
-    handleInput(inputManager) {
-        this.velocity.x = 0;
-        this.velocity.y = 0;
-
-        if (inputManager.isActionPressed('MOVE_LEFT')) {
-            this.velocity.x = -this.speed;
-        }
-        if (inputManager.isActionPressed('MOVE_RIGHT')) {
-            this.velocity.x = this.speed;
-        }
-        if (inputManager.isActionPressed('MOVE_UP')) {
-            this.velocity.y = -this.speed;
-        }
-        if (inputManager.isActionPressed('MOVE_DOWN')) {
-            this.velocity.y = this.speed;
-        }
-
-        // Normalize diagonal movement
-        if (this.velocity.x !== 0 && this.velocity.y !== 0) {
-            const normalized = this.velocity.normalize();
-            this.velocity = normalized.multiply(this.speed);
-        }
-
-        // Handle shooting
-        if (inputManager.isActionJustPressed('SHOOT')) {
-            this.shoot();
-        }
-    }
-
-    /**
-     * Update player position
-     * @param {number} deltaTime - Time since last update
-     */
-    updatePosition(deltaTime) {
-        this.position = this.position.add(this.velocity.multiply(deltaTime / 16.67));
-    }
-
-    /**
-     * Constrain player to canvas bounds
-     */
-    constrainToCanvas() {
-        this.position.x = Math.max(0, Math.min(GAME_CONFIG.canvas.width - this.width, this.position.x));
-        this.position.y = Math.max(0, Math.min(GAME_CONFIG.canvas.height - this.height, this.position.y));
-    }
-
-    /**
-     * Handle shooting action
-     */
-    shoot() {
-        this.logger.info('Player shooting');
-        // Shooting logic would be implemented here
-    }
-
-    /**
-     * Render the player
-     * @param {CanvasRenderingContext2D} ctx - The rendering context
-     */
-    render(ctx) {
-        ctx.fillStyle = this.color;
-        ctx.fillRect(this.position.x, this.position.y, this.width, this.height);
+        this.lastShotTime = 0;
+        this.active = true;
         
-        // Draw health bar
-        this.renderHealthBar(ctx);
+        this._logInfo('Player entity created');
     }
 
     /**
-     * Render player health bar
-     * @param {CanvasRenderingContext2D} ctx - The rendering context
+     * Update player state
+     * @param {number} deltaTime - Time since last update in seconds
+     * @param {InputManager} input - Input manager instance
      */
-    renderHealthBar(ctx) {
-        const barWidth = this.width;
-        const barHeight = 4;
-        const barY = this.position.y - 8;
-        
-        // Background
-        ctx.fillStyle = '#FF0000';
-        ctx.fillRect(this.position.x, barY, barWidth, barHeight);
-        
-        // Health
-        const healthPercent = this.health / this.maxHealth;
-        ctx.fillStyle = '#00FF00';
-        ctx.fillRect(this.position.x, barY, barWidth * healthPercent, barHeight);
+    update(deltaTime, input) {
+        if (!this.active) return;
+
+        try {
+            // Get movement input
+            const movement = input.getMovementVector();
+            
+            // Apply movement
+            this.velocity = movement.multiply(GAME_CONFIG.PLAYER.SPEED);
+            const deltaPosition = this.velocity.multiply(deltaTime);
+            this.position = this.position.add(deltaPosition);
+            
+            // Constrain to screen bounds
+            this._constrainToScreen();
+            
+        } catch (error) {
+            this._logError('Failed to update player', error);
+        }
     }
 
     /**
-     * Get player bounds for collision detection
+     * Constrain player position to screen boundaries
+     * @private
+     */
+    _constrainToScreen() {
+        const margin = 5;
+        
+        if (this.position.x < margin) {
+            this.position.x = margin;
+        }
+        if (this.position.x > GAME_CONFIG.CANVAS.WIDTH - this.size.x - margin) {
+            this.position.x = GAME_CONFIG.CANVAS.WIDTH - this.size.x - margin;
+        }
+        if (this.position.y < margin) {
+            this.position.y = margin;
+        }
+        if (this.position.y > GAME_CONFIG.CANVAS.HEIGHT - this.size.y - margin) {
+            this.position.y = GAME_CONFIG.CANVAS.HEIGHT - this.size.y - margin;
+        }
+    }
+
+    /**
+     * Check if player can shoot
+     * @param {number} currentTime - Current timestamp
+     * @returns {boolean} True if can shoot
+     */
+    canShoot(currentTime) {
+        return currentTime - this.lastShotTime >= GAME_CONFIG.PROJECTILE.COOLDOWN;
+    }
+
+    /**
+     * Shoot projectile
+     * @param {number} currentTime - Current timestamp
+     * @returns {Object|null} Projectile data or null
+     */
+    shoot(currentTime) {
+        if (!this.canShoot(currentTime)) {
+            return null;
+        }
+
+        this.lastShotTime = currentTime;
+        
+        return {
+            position: new Vector2D(
+                this.position.x + this.size.x / 2 - GAME_CONFIG.PROJECTILE.WIDTH / 2,
+                this.position.y
+            ),
+            velocity: new Vector2D(0, -GAME_CONFIG.PROJECTILE.SPEED),
+            size: new Vector2D(GAME_CONFIG.PROJECTILE.WIDTH, GAME_CONFIG.PROJECTILE.HEIGHT),
+            type: 'player'
+        };
+    }
+
+    /**
+     * Get bounding box for collision detection
      * @returns {Object} Bounding box
      */
     getBounds() {
         return {
             x: this.position.x,
             y: this.position.y,
-            width: this.width,
-            height: this.height
+            width: this.size.x,
+            height: this.size.y
         };
     }
-}
-
-// ============================================================================
-// GAME STATE MANAGEMENT
-// ============================================================================
-
-/**
- * Game state manager for handling different game states
- */
-class GameStateManager {
-    constructor() {
-        this.currentState = GAME_STATES.LOADING;
-        this.previousState = null;
-        this.stateData = new Map();
-        this.logger = new Logger('GameStateManager');
-    }
 
     /**
-     * Change to a new game state
-     * @param {string} newState - The new state
-     * @param {Object} data - Optional state data
+     * Take damage
+     * @param {number} amount - Damage amount
      */
-    changeState(newState, data = null) {
-        if (!Object.values(GAME_STATES).includes(newState)) {
-            this.logger.error(`Invalid game state: ${newState}`);
-            return;
-        }
-
-        this.previousState = this.currentState;
-        this.currentState = newState;
-        
-        if (data) {
-            this.stateData.set(newState, data);
-        }
-
-        this.logger.info(`State changed from ${this.previousState} to ${this.currentState}`);
-    }
-
-    /**
-     * Get current game state
-     * @returns {string} Current state
-     */
-    getCurrentState() {
-        return this.currentState;
-    }
-
-    /**
-     * Check if in specific state
-     * @param {string} state - State to check
-     * @returns {boolean} True if in specified state
-     */
-    isInState(state) {
-        return this.currentState === state;
-    }
-
-    /**
-     * Get state data
-     * @param {string} state - State to get data for
-     * @returns {Object|null} State data
-     */
-    getStateData(state) {
-        return this.stateData.get(state) || null;
-    }
-}
-
-// ============================================================================
-// RENDERER
-// ============================================================================
-
-/**
- * Canvas renderer for game graphics
- */
-class Renderer {
-    constructor(canvas) {
-        this.canvas = canvas;
-        this.ctx = canvas.getContext('2d');
-        this.logger = new Logger('Renderer');
-        
-        this.setupCanvas();
-    }
-
-    /**
-     * Setup canvas properties
-     */
-    setupCanvas() {
-        this.canvas.width = GAME_CONFIG.canvas.width;
-        this.canvas.height = GAME_CONFIG.canvas.height;
-        this.canvas.style.border = '1px solid #333';
-        this.canvas.style.backgroundColor = GAME_CONFIG.canvas.backgroundColor;
-    }
-
-    /**
-     * Clear the canvas
-     */
-    clear() {
-        this.ctx.fillStyle = GAME_CONFIG.canvas.backgroundColor;
-        this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
-    }
-
-    /**
-     * Render debug information
-     * @param {Object} debugInfo - Debug information to display
-     */
-    renderDebugInfo(debugInfo) {
-        this.ctx.fillStyle = '#FFFFFF';
-        this.ctx.font = '12px monospace';
-        
-        let y = 20;
-        for (const [key, value] of Object.entries(debugInfo)) {
-            this.ctx.fillText(`${key}: ${value}`, 10, y);
-            y += 15;
+    takeDamage(amount) {
+        this.health = Math.max(0, this.health - amount);
+        if (this.health <= 0) {
+            this.active = false;
+            this._logInfo('Player destroyed');
         }
     }
 
     /**
-     * Render game UI
-     * @param {Object} gameData - Game data to display
+     * Log info message
+     * @private
+     * @param {string} message - Message to log
      */
-    renderUI(gameData) {
-        // Score
-        this.ctx.fillStyle = '#FFFFFF';
-        this.ctx.font = '20px Arial';
-        this.ctx.fillText(`Score: ${gameData.score || 0}`, 10, 30);
-        
-        // Lives
-        this.ctx.fillText(`Lives: ${gameData.lives || 3}`, 10, 60);
-        
-        // Level
-        this.ctx.fillText(`Level: ${gameData.level || 1}`, 10, 90);
+    _logInfo(message) {
+        console.log(`[Player] ${message}`);
     }
 
     /**
-     * Render pause overlay
+     * Log error message
+     * @private
+     * @param {string} message - Error message
+     * @param {Error} error - Error object
      */
-    renderPauseOverlay() {
-        // Semi-transparent overlay
-        this.ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-        this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
-        
-        // Pause text
-        this.ctx.fillStyle = '#FFFFFF';
-        this.ctx.font = '48px Arial';
-        this.ctx.textAlign = 'center';
-        this.ctx.fillText('PAUSED', this.canvas.width / 2, this.canvas.height / 2);
-        
-        this.ctx.font = '16px Arial';
-        this.ctx.fillText('Press P to resume', this.canvas.width / 2, this.canvas.height / 2 + 40);
-        
-        this.ctx.textAlign = 'left';
-    }
-
-    /**
-     * Render game over screen
-     * @param {Object} gameData - Final game data
-     */
-    renderGameOver(gameData) {
-        // Semi-transparent overlay
-        this.ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
-        this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
-        
-        // Game over text
-        this.ctx.fillStyle = '#FF0000';
-        this.ctx.font = '48px Arial';
-        this.ctx.textAlign = 'center';
-        this.ctx.fillText('GAME OVER', this.canvas.width / 2, this.canvas.height / 2 - 40);
-        
-        this.ctx.fillStyle = '#FFFFFF';
-        this.ctx.font = '24px Arial';
-        this.ctx.fillText(`Final Score: ${gameData.score || 0}`, this.canvas.width / 2, this.canvas.height / 2 + 20);
-        
-        this.ctx.font = '16px Arial';
-        this.ctx.fillText('Press R to restart', this.canvas.width / 2, this.canvas.height / 2 + 60);
-        
-        this.ctx.textAlign = 'left';
+    _logError(message, error) {
+        console.error(`[Player] ${message}:`, error);
     }
 }
 
-// ============================================================================
-// MAIN GAME CLASS
-// ============================================================================
-
 /**
- * Main game class that orchestrates all game systems
+ * Main game class
  */
 class Game {
-    constructor(canvasId) {
-        this.logger = new Logger('Game');
-        this.canvas = document.getElementById(canvasId);
+    constructor() {
+        this.canvas = null;
+        this.context = null;
+        this.inputManager = null;
+        this.spriteRenderer = null;
+        this.player = null;
+        this.projectiles = [];
+        this.enemies = [];
         
-        if (!this.canvas) {
-            throw new Error(`Canvas element with id '${canvasId}' not found`);
-        }
-
-        // Initialize core systems
-        this.renderer = new Renderer(this.canvas);
-        this.inputManager = new InputManager();
-        this.stateManager = new GameStateManager();
-        this.performanceMonitor = new PerformanceMonitor();
+        this.lastTime = 0;
+        this.lastEnemySpawn = 0;
+        this.gameRunning = false;
+        this.score = 0;
         
-        // Game entities
-        this.player = new Player(
-            GAME_CONFIG.player.startX,
-            GAME_CONFIG.player.startY
-        );
-        
-        // Game state
-        this.gameData = {
-            score: 0,
-            lives: 3,
-            level: 1,
-            isPaused: false
+        this.performanceMetrics = {
+            frameCount: 0,
+            lastFpsUpdate: 0,
+            currentFps: 0
         };
         
-        // Animation frame tracking
-        this.lastFrameTime = 0;
-        this.animationId = null;
-        this.isRunning = false;
+        this._logInfo('Game instance created');
+    }
+
+    /**
+     * Initialize the game
+     */
+    async init() {
+        try {
+            await this._setupCanvas();
+            this._setupManagers();
+            this._createSprites();
+            this._initializeEntities();
+            this._setupEventListeners();
+            
+            this._logInfo('Game initialized successfully');
+            
+        } catch (error) {
+            this._logError('Failed to initialize game', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Setup canvas and rendering context
+     * @private
+     */
+    async _setupCanvas() {
+        this.canvas = document.getElementById('gameCanvas');
+        if (!this.canvas) {
+            // Create canvas if it doesn't exist
+            this.canvas = document.createElement('canvas');
+            this.canvas.id = 'gameCanvas';
+            this.canvas.width = GAME_CONFIG.CANVAS.WIDTH;
+            this.canvas.height = GAME_CONFIG.CANVAS.HEIGHT;
+            this.canvas.style.border = '1px solid #333';
+            this.canvas.style.display = 'block';
+            this.canvas.style.margin = '0 auto';
+            document.body.appendChild(this.canvas);
+        }
+
+        this.context = this.canvas.getContext('2d');
+        if (!this.context) {
+            throw new Error('Failed to get 2D rendering context');
+        }
+
+        // Set canvas properties
+        this.canvas.width = GAME_CONFIG.CANVAS.WIDTH;
+        this.canvas.height = GAME_CONFIG.CANVAS.HEIGHT;
         
-        this.initializeGame();
+        this._logInfo('Canvas setup complete');
     }
 
     /**
-     * Initialize game systems and event listeners
+     * Setup game managers
+     * @private
      */
-    initializeGame() {
-        this.setupInputListeners();
-        this.stateManager.changeState(GAME_STATES.PLAYING);
-        this.logger.info('Game initialized successfully');
+    _setupManagers() {
+        this.inputManager = new InputManager();
+        this.spriteRenderer = new SpriteRenderer(this.context);
+        
+        this._logInfo('Managers initialized');
     }
 
     /**
-     * Setup input event listeners
+     * Create sprite assets
+     * @private
      */
-    setupInputListeners() {
-        // Pause/Resume
-        this.inputManager.addActionListener('PAUSE', (action, eventType) => {
-            if (eventType === 'keydown') {
-                this.togglePause();
-            }
+    _createSprites() {
+        // Player sprite
+        this.spriteRenderer.createSprite('player', {
+            type: 'player',
+            width: GAME_CONFIG.PLAYER.WIDTH,
+            height: GAME_CONFIG.PLAYER.HEIGHT,
+            color: GAME_CONFIG.PLAYER.COLOR
         });
 
-        // Restart
-        this.inputManager.addActionListener('RESTART', (action, eventType) => {
-            if (eventType === 'keydown') {
-                this.restart();
-            }
+        // Enemy sprite
+        this.spriteRenderer.createSprite('enemy', {
+            type: 'enemy',
+            width: GAME_CONFIG.ENEMY.WIDTH,
+            height: GAME_CONFIG.ENEMY.HEIGHT,
+            color: GAME_CONFIG.ENEMY.COLOR
         });
 
-        // Mute (placeholder)
-        this.inputManager.addActionListener('MUTE', (action, eventType) => {
-            if (eventType === 'keydown') {
-                this.logger.info('Mute toggled');
-            }
+        // Projectile sprite
+        this.spriteRenderer.createSprite('projectile', {
+            type: 'projectile',
+            width: GAME_CONFIG.PROJECTILE.WIDTH,
+            height: GAME_CONFIG.PROJECTILE.HEIGHT,
+            color: GAME_CONFIG.PROJECTILE.COLOR
         });
+        
+        this._logInfo('Sprites created');
     }
 
     /**
-     * Start the game loop
+     * Initialize game entities
+     * @private
+     */
+    _initializeEntities() {
+        const playerStartPos = new Vector2D(
+            GAME_CONFIG.PLAYER.START_X - GAME_CONFIG.PLAYER.WIDTH / 2,
+            GAME_CONFIG.PLAYER.START_Y
+        );
+        
+        this.player = new Player(playerStartPos);
+        this.projectiles = [];
+        this.enemies = [];
+        
+        this._logInfo('Entities initialized');
+    }
+
+    /**
+     * Setup additional event listeners
+     * @private
+     */
+    _setupEventListeners() {
+        // Handle window resize
+        window.addEventListener('resize', () => this._handleResize());
+        
+        // Handle visibility change
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                this.pause();
+            } else {
+                this.resume();
+            }
+        });
+        
+        this._logInfo('Event listeners setup');
+    }
+
+    /**
+     * Handle window resize
+     * @private
+     */
+    _handleResize() {
+        // Could implement responsive canvas sizing here
+        this._logInfo('Window resized');
+    }
+
+    /**
+     * Start the game
      */
     start() {
-        if (this.isRunning) {
-            this.logger.warn('Game is already running');
+        if (this.gameRunning) {
+            this._logInfo('Game already running');
             return;
         }
 
-        this.isRunning = true;
-        this.lastFrameTime = performance.now();
-        this.gameLoop();
-        this.logger.info('Game started');
+        this.gameRunning = true;
+        this.lastTime = performance.now();
+        this._gameLoop();
+        
+        this._logInfo('Game started');
     }
 
     /**
-     * Stop the game loop
+     * Pause the game
      */
-    stop() {
-        if (!this.isRunning) {
-            this.logger.warn('Game is not running');
-            return;
-        }
+    pause() {
+        this.gameRunning = false;
+        this._logInfo('Game paused');
+    }
 
-        this.isRunning = false;
-        if (this.animationId) {
-            cancelAnimationFrame(this.animationId);
-            this.animationId = null;
-        }
-        this.logger.info('Game stopped');
+    /**
+     * Resume the game
+     */
+    resume() {
+        if (this.gameRunning) return;
+        
+        this.gameRunning = true;
+        this.lastTime = performance.now();
+        this._gameLoop();
+        
+        this._logInfo('Game resumed');
     }
 
     /**
      * Main game loop
-     * @param {number} currentTime - Current timestamp
+     * @private
      */
-    gameLoop(currentTime = performance.now()) {
-        if (!this.isRunning) return;
+    _gameLoop() {
+        if (!this.gameRunning) return;
 
-        const deltaTime = currentTime - this.lastFrameTime;
-        this.lastFrameTime = currentTime;
+        const currentTime = performance.now();
+        const deltaTime = (currentTime - this.lastTime) / 1000; // Convert to seconds
+        this.lastTime = currentTime;
 
-        // Update performance metrics
-        this.performanceMonitor.update(currentTime);
+        try {
+            this._update(deltaTime, currentTime);
+            this._render();
+            this._updatePerformanceMetrics(currentTime);
+            
+        } catch (error) {
+            this._logError('Error in game loop', error);
+        }
 
-        // Update game systems
-        this.update(deltaTime);
-        this.render();
-
-        // Schedule next frame
-        this.animationId = requestAnimationFrame(this.gameLoop.bind(this));
+        requestAnimationFrame(() => this._gameLoop());
     }
 
     /**
      * Update game state
+     * @private
      * @param {number} deltaTime - Time since last update
+     * @param {number} currentTime - Current timestamp
      */
-    update(deltaTime) {
-        try {
-            // Skip updates if paused
-            if (this.stateManager.isInState(GAME_STATES.PAUSED)) {
-                return;
-            }
-
-            // Update input manager
-            this.inputManager.update();
-
-            // Update game entities based on current state
-            switch (this.stateManager.getCurrentState()) {
-                case GAME_STATES.PLAYING:
-                    this.updateGameplay(deltaTime);
-                    break;
-                case GAME_STATES.GAME_OVER:
-                    this.updateGameOver(deltaTime);
-                    break;
-                default:
-                    break;
-            }
-
-        } catch (error) {
-            this.logger.error('Error in game update', error);
-        }
-    }
-
-    /**
-     * Update gameplay state
-     * @param {number} deltaTime - Time since last update
-     */
-    updateGameplay(deltaTime) {
+    _update(deltaTime, currentTime) {
         // Update player
-        this.player.update(this.inputManager, deltaTime);
-
-        // Process input buffer for any missed inputs
-        const inputBuffer = this.inputManager.consumeBuffer();
-        if (inputBuffer.length > 0) {
-            this.logger.debug(`Processed ${inputBuffer.length} buffered inputs`);
-        }
-
-        // Check for game over conditions
-        if (this.gameData.lives <= 0) {
-            this.stateManager.changeState(GAME_STATES.GAME_OVER);
-        }
-    }
-
-    /**
-     * Update game over state
-     * @param {number} deltaTime - Time since last update
-     */
-    updateGameOver(deltaTime) {
-        // Handle restart input
-        if (this.inputManager.isActionJustPressed('RESTART')) {
-            this.restart();
-        }
-    }
-
-    /**
-     * Render game graphics
-     */
-    render() {
-        try {
-            // Clear canvas
-            this.renderer.clear();
-
-            // Render based on current state
-            switch (this.stateManager.getCurrentState()) {
-                case GAME_STATES.PLAYING:
-                    this.renderGameplay();
-                    break;
-                case GAME_STATES.PAUSED:
-                    this.renderGameplay();
-                    this.renderer.renderPauseOverlay();
-                    break;
-                case GAME_STATES.GAME_OVER:
-                    this.renderGameplay();
-                    this.renderer.renderGameOver(this.gameData);
-                    break;
-                default:
-                    break;
+        if (this.player && this.player.active) {
+            this.player.update(deltaTime, this.inputManager);
+            
+            // Handle shooting
+            if (this.inputManager.isShooting()) {
+                const projectile = this.player.shoot(currentTime);
+                if (projectile) {
+                    this.projectiles.push(projectile);
+                }
             }
+        }
 
-            // Render debug info if needed
-            if (this.shouldShowDebugInfo()) {
-                this.renderDebugInfo();
+        // Spawn enemies
+        if (currentTime - this.lastEnemySpawn >= GAME_CONFIG.ENEMY.SPAWN_RATE) {
+            this._spawnEnemy();
+            this.lastEnemySpawn = currentTime;
+        }
+
+        // Update projectiles
+        this._updateProjectiles(deltaTime);
+        
+        // Update enemies
+        this._updateEnemies(deltaTime);
+        
+        // Check collisions
+        this._checkCollisions();
+        
+        // Clean up inactive entities
+        this._cleanupEntities();
+    }
+
+    /**
+     * Spawn a new enemy
+     * @private
+     */
+    _spawnEnemy() {
+        const enemy = {
+            position: new Vector2D(
+                Math.random() * (GAME_CONFIG.CANVAS.WIDTH - GAME_CONFIG.ENEMY.WIDTH),
+                -GAME_CONFIG.ENEMY.HEIGHT
+            ),
+            velocity: new Vector2D(0, GAME_CONFIG.ENEMY.SPEED),
+            size: new Vector2D(GAME_CONFIG.ENEMY.WIDTH, GAME_CONFIG.ENEMY.HEIGHT),
+            health: 1,
+            active: true
+        };
+        
+        this.enemies.push(enemy);
+    }
+
+    /**
+     * Update projectiles
+     * @private
+     * @param {number} deltaTime - Time delta
+     */
+    _updateProjectiles(deltaTime) {
+        for (const projectile of this.projectiles) {
+            if (!projectile.active) continue;
+            
+            const deltaPosition = projectile.velocity.multiply(deltaTime);
+            projectile.position = projectile.position.add(deltaPosition);
+            
+            // Remove projectiles that are off-screen
+            if (projectile.position.y < -projectile.size.y || 
+                projectile.position.y > GAME_CONFIG.CANVAS.HEIGHT) {
+                projectile.active = false;
             }
-
-        } catch (error) {
-            this.logger.error('Error in game render', error);
         }
     }
 
     /**
-     * Render gameplay elements
+     * Update enemies
+     * @private
+     * @param {number} deltaTime - Time delta
      */
-    renderGameplay() {
-        // Render UI
-        this.renderer.renderUI(this.gameData);
+    _updateEnemies(deltaTime) {
+        for (const enemy of this.enemies) {
+            if (!enemy.active) continue;
+            
+            const deltaPosition = enemy.velocity.multiply(deltaTime);
+            enemy.position = enemy.position.add(deltaPosition);
+            
+            // Remove enemies that are off-screen
+            if (enemy.position.y > GAME_CONFIG.CANVAS.HEIGHT) {
+                enemy.active = false;
+            }
+        }
+    }
+
+    /**
+     * Check collisions between entities
+     * @private
+     */
+    _checkCollisions() {
+        // Check projectile-enemy collisions
+        for (const projectile of this.projectiles) {
+            if (!projectile.active || projectile.type !== 'player') continue;
+            
+            for (const enemy of this.enemies) {
+                if (!enemy.active) continue;
+                
+                if (this._checkCollision(projectile, enemy)) {
+                    projectile.active = false;
+                    enemy.active = false;
+                    this.score += 10;
+                }
+            }
+        }
+
+        // Check player-enemy collisions
+        if (this.player && this.player.active) {
+            for (const enemy of this.enemies) {
+                if (!enemy.active) continue;
+                
+                if (this._checkCollision(this.player, enemy)) {
+                    enemy.active = false;
+                    this.player.takeDamage(20);
+                }
+            }
+        }
+    }
+
+    /**
+     * Check collision between two entities
+     * @private
+     * @param {Object} a - First entity
+     * @param {Object} b - Second entity
+     * @returns {boolean} True if collision detected
+     */
+    _checkCollision(a, b) {
+        return a.position.x < b.position.x + b.size.x &&
+               a.position.x + a.size.x > b.position.x &&
+               a.position.y < b.position.y + b.size.y &&
+               a.position.y + a.size.y > b.position.y;
+    }
+
+    /**
+     * Clean up inactive entities
+     * @private
+     */
+    _cleanupEntities() {
+        this.projectiles = this.projectiles.filter(p => p.active);
+        this.enemies = this.enemies.filter(e => e.active);
+    }
+
+    /**
+     * Render the game
+     * @private
+     */
+    _render() {
+        // Clear canvas
+        this.context.fillStyle = GAME_CONFIG.CANVAS.BACKGROUND_COLOR;
+        this.context.fillRect(0, 0, GAME_CONFIG.CANVAS.WIDTH, GAME_CONFIG.CANVAS.HEIGHT);
 
         // Render player
-        this.player.render(this.renderer.ctx);
+        if (this.player && this.player.active) {
+            this.spriteRenderer.render('player', this.player.position);
+        }
+
+        // Render projectiles
+        for (const projectile of this.projectiles) {
+            if (projectile.active) {
+                this.spriteRenderer.render('projectile', projectile.position);
+            }
+        }
+
+        // Render enemies
+        for (const enemy of this.enemies) {
+            if (enemy.active) {
+                this.spriteRenderer.render('enemy', enemy.position);
+            }
+        }
+
+        // Render UI
+        this._renderUI();
     }
 
     /**
-     * Render debug information
+     * Render UI elements
+     * @private
      */
-    renderDebugInfo() {
-        const metrics = this.performanceMonitor.getMetrics();
-        const debugInfo = {
-            FPS: metrics.currentFPS,
-            'Avg FPS': metrics.averageFPS,
-            'Frame Time': `${metrics.frameTime}ms`,
-            State: this.stateManager.getCurrentState(),
-            'Player X': Math.round(this.player.position.x),
-            'Player Y': Math.round(this.player.position.y)
-        };
-
-        this.renderer.renderDebugInfo(debugInfo);
-    }
-
-    /**
-     * Check if debug info should be shown
-     * @returns {boolean} True if debug info should be shown
-     */
-    shouldShowDebugInfo() {
-        // Show debug info in development or when performance is poor
-        return window.location.hostname === 'localhost' || 
-               this.performanceMonitor.getMetrics().currentFPS < 30;
-    }
-
-    /**
-     * Toggle pause state
-     */
-    togglePause() {
-        if (this.stateManager.isInState(GAME_STATES.PLAYING)) {
-            this.stateManager.changeState(GAME_STATES.PAUSED);
-            this.inputManager.setEnabled(false);
-            this.logger.info('Game paused');
-        } else if (this.stateManager.isInState(GAME_STATES.PAUSED)) {
-            this.stateManager.changeState(GAME_STATES.PLAYING);
-            this.inputManager.setEnabled(true);
-            this.logger.info('Game resumed');
+    _renderUI() {
+        this.context.fillStyle = '#FFFFFF';
+        this.context.font = '16px Arial';
+        
+        // Score
+        this.context.fillText(`Score: ${this.score}`, 10, 30);
+        
+        // Health
+        if (this.player) {
+            this.context.fillText(`Health: ${this.player.health}`, 10, 50);
+        }
+        
+        // FPS
+        this.context.fillText(`FPS: ${this.performanceMetrics.currentFps}`, 10, 70);
+        
+        // Game over screen
+        if (this.player && !this.player.active) {
+            this.context.fillStyle = 'rgba(0, 0, 0, 0.7)';
+            this.context.fillRect(0, 0, GAME_CONFIG.CANVAS.WIDTH, GAME_CONFIG.CANVAS.HEIGHT);
+            
+            this.context.fillStyle = '#FFFFFF';
+            this.context.font = '48px Arial';
+            this.context.textAlign = 'center';
+            this.context.fillText('GAME OVER', GAME_CONFIG.CANVAS.WIDTH / 2, GAME_CONFIG.CANVAS.HEIGHT / 2);
+            this.context.font = '24px Arial';
+            this.context.fillText(`Final Score: ${this.score}`, GAME_CONFIG.CANVAS.WIDTH / 2, GAME_CONFIG.CANVAS.HEIGHT / 2 + 50);
+            this.context.textAlign = 'left';
         }
     }
 
     /**
-     * Restart the game
+     * Update performance metrics
+     * @private
+     * @param {number} currentTime - Current timestamp
      */
-    restart() {
-        this.logger.info('Restarting game');
+    _updatePerformanceMetrics(currentTime) {
+        this.performanceMetrics.frameCount++;
         
-        // Reset game data
-        this.gameData = {
-            score: 0,
-            lives: 3,
-            level: 1,
-            isPaused: false
-        };
-
-        // Reset player
-        this.player = new Player(
-            GAME_CONFIG.player.startX,
-            GAME_CONFIG.player.startY
-        );
-
-        // Reset state
-        this.stateManager.changeState(GAME_STATES.PLAYING);
-        this.inputManager.setEnabled(true);
+        if (currentTime - this.performanceMetrics.lastFpsUpdate >= 1000) {
+            this.performanceMetrics.currentFps = this.performanceMetrics.frameCount;
+            this.performanceMetrics.frameCount = 0;
+            this.performanceMetrics.lastFpsUpdate = currentTime;
+        }
     }
 
     /**
-     * Get current game statistics
-     * @returns {Object} Game statistics
+     * Get current game state
+     * @returns {Object} Game state information
      */
-    getGameStats() {
+    getGameState() {
         return {
-            ...this.gameData,
-            performance: this.performanceMonitor.getMetrics(),
-            state: this.stateManager.getCurrentState(),
-            uptime: performance.now()
+            running: this.gameRunning,
+            score: this.score,
+            playerActive: this.player ? this.player.active : false,
+            playerHealth: this.player ? this.player.health : 0,
+            enemyCount: this.enemies.filter(e => e.active).length,
+            projectileCount: this.projectiles.filter(p => p.active).length,
+            fps: this.performanceMetrics.currentFps
         };
     }
 
     /**
-     * Cleanup resources when game is destroyed
+     * Log info message
+     * @private
+     * @param {string} message - Message to log
      */
-    destroy() {
-        this.stop();
-        this.inputManager.setEnabled(false);
-        this.logger.info('Game destroyed');
+    _logInfo(message) {
+        console.log(`[Game] ${message}`);
+    }
+
+    /**
+     * Log error message
+     * @private
+     * @param {string} message - Error message
+     * @param {Error} error - Error object
+     */
+    _logError(message, error) {
+        console.error(`[Game] ${message}:`, error);
     }
 }
 
-// ============================================================================
-// INITIALIZATION AND ERROR HANDLING
-// ============================================================================
-
 /**
- * Initialize the game when DOM is ready
+ * Initialize and start the game when DOM is loaded
  */
-function initializeGame() {
+document.addEventListener('DOMContentLoaded', async () => {
     try {
-        // Wait for DOM to be ready
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', initializeGame);
-            return;
-        }
-
-        // Create canvas if it doesn't exist
-        let canvas = document.getElementById('gameCanvas');
-        if (!canvas) {
-            canvas = document.createElement('canvas');
-            canvas.id = 'gameCanvas';
-            document.body.appendChild(canvas);
-        }
-
-        // Initialize and start game
-        const game = new Game('gameCanvas');
+        const game = new Game();
+        await game.init();
         game.start();
-
-        // Make game globally accessible for debugging
+        
+        // Expose game instance for debugging
         window.game = game;
-
-        // Handle page visibility changes
-        document.addEventListener('visibilitychange', () => {
-            if (document.hidden) {
-                if (game.stateManager.isInState(GAME_STATES.PLAYING)) {
-                    game.togglePause();
-                }
-            }
-        });
-
-        console.log('🎮 Space Invaders Game initialized successfully!');
-        console.log('🎯 Controls: Arrow keys or WASD to move, Space to shoot, P to pause, R to restart');
-
+        
+        console.log('[SpaceInvaders] Game loaded successfully');
+        console.log('[SpaceInvaders] Controls: Arrow keys or WASD to move, Space to shoot');
+        
     } catch (error) {
-        console.error('❌ Failed to initialize game:', error);
+        console.error('[SpaceInvaders] Failed to start game:', error);
         
         // Show error message to user
         const errorDiv = document.createElement('div');
@@ -1148,48 +1152,15 @@ function initializeGame() {
             z-index: 1000;
         `;
         errorDiv.innerHTML = `
-            <h3>Game Initialization Failed</h3>
-            <p>${error.message}</p>
-            <p>Please refresh the page to try again.</p>
+            <h3>Game Failed to Load</h3>
+            <p>Please refresh the page and try again.</p>
+            <p><small>Error: ${error.message}</small></p>
         `;
         document.body.appendChild(errorDiv);
     }
-}
-
-// ============================================================================
-// GLOBAL ERROR HANDLING
-// ============================================================================
-
-// Handle uncaught errors
-window.addEventListener('error', (event) => {
-    console.error('🚨 Uncaught error:', event.error);
 });
 
-// Handle unhandled promise rejections
-window.addEventListener('unhandledrejection', (event) => {
-    console.error('🚨 Unhandled promise rejection:', event.reason);
-});
-
-// ============================================================================
-// MODULE EXPORTS AND INITIALIZATION
-// ============================================================================
-
-// Export classes for testing or external use
+// Export for module systems
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = {
-        Game,
-        InputManager,
-        Player,
-        GameStateManager,
-        Renderer,
-        PerformanceMonitor,
-        Logger,
-        Vector2D,
-        GAME_CONFIG,
-        KEY_MAPPINGS,
-        GAME_STATES
-    };
-} else {
-    // Browser environment - initialize game
-    initializeGame();
+    module.exports = { Game, Player, InputManager, SpriteRenderer, Vector2D };
 }
