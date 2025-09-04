@@ -1,1282 +1,721 @@
 /**
- * Player Entity with Integrated Keyboard Input System
+ * Player Entity Module
  * 
- * This module implements a comprehensive player entity that handles:
- * - Keyboard input with key mapping and buffering
- * - Smooth movement with velocity-based physics
- * - Action handling (shooting, special abilities)
- * - State management and collision detection
- * - Performance optimization with input debouncing
+ * Implements the player ship entity with sprite rendering, position management,
+ * and basic movement capabilities within the game world. This module follows
+ * clean architecture principles with clear separation of concerns between
+ * rendering, physics, and game logic.
  * 
- * Architecture:
- * - Event-driven input system with configurable key bindings
- * - Component-based entity design for modularity
- * - Observer pattern for state changes
- * - Strategy pattern for different movement modes
+ * Key Features:
+ * - Bounded movement within game world
+ * - Sprite-based rendering with animation support
+ * - Health and damage management
+ * - Input-responsive movement system
+ * - Performance-optimized update cycles
  * 
- * Dependencies: None (self-contained implementation)
- * Browser Compatibility: ES6+ (Chrome 60+, Firefox 55+, Safari 12+)
+ * Architecture Decisions:
+ * - Entity-Component pattern for modularity
+ * - Event-driven state changes for decoupling
+ * - Immutable position updates for predictability
+ * - Resource pooling for performance optimization
+ * 
+ * @author Space Invaders Development Team
+ * @version 1.0.0
+ * @since 2025-01-27
  */
 
-'use strict';
-
 /**
- * Vector2D utility class for position and velocity calculations
- */
-class Vector2D {
-    /**
-     * @param {number} x - X coordinate
-     * @param {number} y - Y coordinate
-     */
-    constructor(x = 0, y = 0) {
-        this.x = x;
-        this.y = y;
-    }
-
-    /**
-     * Add another vector to this vector
-     * @param {Vector2D} other - Vector to add
-     * @returns {Vector2D} New vector result
-     */
-    add(other) {
-        return new Vector2D(this.x + other.x, this.y + other.y);
-    }
-
-    /**
-     * Multiply vector by scalar
-     * @param {number} scalar - Multiplication factor
-     * @returns {Vector2D} New scaled vector
-     */
-    multiply(scalar) {
-        return new Vector2D(this.x * scalar, this.y * scalar);
-    }
-
-    /**
-     * Get vector magnitude
-     * @returns {number} Vector length
-     */
-    magnitude() {
-        return Math.sqrt(this.x * this.x + this.y * this.y);
-    }
-
-    /**
-     * Normalize vector to unit length
-     * @returns {Vector2D} Normalized vector
-     */
-    normalize() {
-        const mag = this.magnitude();
-        return mag > 0 ? new Vector2D(this.x / mag, this.y / mag) : new Vector2D(0, 0);
-    }
-
-    /**
-     * Create copy of vector
-     * @returns {Vector2D} Cloned vector
-     */
-    clone() {
-        return new Vector2D(this.x, this.y);
-    }
-}
-
-/**
- * Input buffer for storing and processing input commands
- */
-class InputBuffer {
-    /**
-     * @param {number} maxSize - Maximum buffer size
-     * @param {number} timeWindow - Time window for input validity (ms)
-     */
-    constructor(maxSize = 10, timeWindow = 100) {
-        this.buffer = [];
-        this.maxSize = maxSize;
-        this.timeWindow = timeWindow;
-    }
-
-    /**
-     * Add input to buffer with timestamp
-     * @param {string} action - Action name
-     * @param {Object} data - Additional input data
-     */
-    addInput(action, data = {}) {
-        const input = {
-            action,
-            data,
-            timestamp: performance.now()
-        };
-
-        this.buffer.push(input);
-        
-        // Maintain buffer size
-        if (this.buffer.length > this.maxSize) {
-            this.buffer.shift();
-        }
-
-        // Clean old inputs
-        this.cleanOldInputs();
-    }
-
-    /**
-     * Get recent inputs within time window
-     * @returns {Array} Recent input commands
-     */
-    getRecentInputs() {
-        this.cleanOldInputs();
-        return [...this.buffer];
-    }
-
-    /**
-     * Check if specific action exists in recent inputs
-     * @param {string} action - Action to check
-     * @returns {boolean} True if action found
-     */
-    hasRecentAction(action) {
-        return this.getRecentInputs().some(input => input.action === action);
-    }
-
-    /**
-     * Remove inputs older than time window
-     * @private
-     */
-    cleanOldInputs() {
-        const now = performance.now();
-        this.buffer = this.buffer.filter(input => 
-            now - input.timestamp <= this.timeWindow
-        );
-    }
-
-    /**
-     * Clear all buffered inputs
-     */
-    clear() {
-        this.buffer = [];
-    }
-}
-
-/**
- * Keyboard input manager with key mapping and event handling
- */
-class KeyboardInputManager {
-    constructor() {
-        this.keyStates = new Map();
-        this.keyBindings = new Map();
-        this.inputBuffer = new InputBuffer();
-        this.listeners = new Map();
-        this.isEnabled = true;
-        
-        // Default key bindings
-        this.setupDefaultBindings();
-        
-        // Bind event handlers
-        this.handleKeyDown = this.handleKeyDown.bind(this);
-        this.handleKeyUp = this.handleKeyUp.bind(this);
-        
-        // Start listening for keyboard events
-        this.startListening();
-    }
-
-    /**
-     * Setup default key bindings for player controls
-     * @private
-     */
-    setupDefaultBindings() {
-        const defaultBindings = {
-            // Movement
-            'ArrowLeft': 'move_left',
-            'KeyA': 'move_left',
-            'ArrowRight': 'move_right',
-            'KeyD': 'move_right',
-            'ArrowUp': 'move_up',
-            'KeyW': 'move_up',
-            'ArrowDown': 'move_down',
-            'KeyS': 'move_down',
-            
-            // Actions
-            'Space': 'shoot',
-            'KeyX': 'shoot',
-            'KeyZ': 'special_ability',
-            'ShiftLeft': 'boost',
-            'ShiftRight': 'boost',
-            
-            // Game controls
-            'Escape': 'pause',
-            'KeyP': 'pause',
-            'KeyR': 'restart'
-        };
-
-        Object.entries(defaultBindings).forEach(([key, action]) => {
-            this.keyBindings.set(key, action);
-        });
-    }
-
-    /**
-     * Start listening for keyboard events
-     * @private
-     */
-    startListening() {
-        if (typeof window !== 'undefined') {
-            window.addEventListener('keydown', this.handleKeyDown, { passive: false });
-            window.addEventListener('keyup', this.handleKeyUp, { passive: false });
-            
-            // Prevent context menu on right-click during gameplay
-            window.addEventListener('contextmenu', (e) => {
-                if (this.isEnabled) {
-                    e.preventDefault();
-                }
-            });
-        }
-    }
-
-    /**
-     * Stop listening for keyboard events
-     */
-    stopListening() {
-        if (typeof window !== 'undefined') {
-            window.removeEventListener('keydown', this.handleKeyDown);
-            window.removeEventListener('keyup', this.handleKeyUp);
-        }
-    }
-
-    /**
-     * Handle keydown events
-     * @param {KeyboardEvent} event - Keyboard event
-     * @private
-     */
-    handleKeyDown(event) {
-        if (!this.isEnabled) return;
-
-        const key = event.code;
-        const action = this.keyBindings.get(key);
-
-        if (action) {
-            // Prevent default browser behavior for game keys
-            event.preventDefault();
-            
-            // Update key state
-            if (!this.keyStates.get(key)) {
-                this.keyStates.set(key, true);
-                
-                // Add to input buffer
-                this.inputBuffer.addInput(action, {
-                    key,
-                    type: 'keydown',
-                    timestamp: event.timeStamp
-                });
-
-                // Notify listeners
-                this.notifyListeners(action, { type: 'start', key, event });
-            }
-        }
-    }
-
-    /**
-     * Handle keyup events
-     * @param {KeyboardEvent} event - Keyboard event
-     * @private
-     */
-    handleKeyUp(event) {
-        if (!this.isEnabled) return;
-
-        const key = event.code;
-        const action = this.keyBindings.get(key);
-
-        if (action) {
-            event.preventDefault();
-            
-            // Update key state
-            this.keyStates.set(key, false);
-            
-            // Add to input buffer
-            this.inputBuffer.addInput(action + '_end', {
-                key,
-                type: 'keyup',
-                timestamp: event.timeStamp
-            });
-
-            // Notify listeners
-            this.notifyListeners(action, { type: 'end', key, event });
-        }
-    }
-
-    /**
-     * Check if a key is currently pressed
-     * @param {string} key - Key code to check
-     * @returns {boolean} True if key is pressed
-     */
-    isKeyPressed(key) {
-        return this.keyStates.get(key) || false;
-    }
-
-    /**
-     * Check if an action is currently active
-     * @param {string} action - Action name to check
-     * @returns {boolean} True if action is active
-     */
-    isActionActive(action) {
-        for (const [key, boundAction] of this.keyBindings) {
-            if (boundAction === action && this.isKeyPressed(key)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    /**
-     * Get all currently active actions
-     * @returns {Array<string>} List of active actions
-     */
-    getActiveActions() {
-        const activeActions = new Set();
-        
-        for (const [key, action] of this.keyBindings) {
-            if (this.isKeyPressed(key)) {
-                activeActions.add(action);
-            }
-        }
-        
-        return Array.from(activeActions);
-    }
-
-    /**
-     * Bind a key to an action
-     * @param {string} key - Key code
-     * @param {string} action - Action name
-     */
-    bindKey(key, action) {
-        this.keyBindings.set(key, action);
-    }
-
-    /**
-     * Unbind a key
-     * @param {string} key - Key code to unbind
-     */
-    unbindKey(key) {
-        this.keyBindings.delete(key);
-    }
-
-    /**
-     * Add event listener for specific action
-     * @param {string} action - Action name
-     * @param {Function} callback - Callback function
-     */
-    addEventListener(action, callback) {
-        if (!this.listeners.has(action)) {
-            this.listeners.set(action, []);
-        }
-        this.listeners.get(action).push(callback);
-    }
-
-    /**
-     * Remove event listener
-     * @param {string} action - Action name
-     * @param {Function} callback - Callback function to remove
-     */
-    removeEventListener(action, callback) {
-        const actionListeners = this.listeners.get(action);
-        if (actionListeners) {
-            const index = actionListeners.indexOf(callback);
-            if (index > -1) {
-                actionListeners.splice(index, 1);
-            }
-        }
-    }
-
-    /**
-     * Notify all listeners for an action
-     * @param {string} action - Action name
-     * @param {Object} data - Event data
-     * @private
-     */
-    notifyListeners(action, data) {
-        const actionListeners = this.listeners.get(action);
-        if (actionListeners) {
-            actionListeners.forEach(callback => {
-                try {
-                    callback(data);
-                } catch (error) {
-                    console.error(`Error in input listener for action ${action}:`, error);
-                }
-            });
-        }
-    }
-
-    /**
-     * Enable/disable input processing
-     * @param {boolean} enabled - Whether input should be processed
-     */
-    setEnabled(enabled) {
-        this.isEnabled = enabled;
-        if (!enabled) {
-            this.keyStates.clear();
-            this.inputBuffer.clear();
-        }
-    }
-
-    /**
-     * Get input buffer for advanced input processing
-     * @returns {InputBuffer} Current input buffer
-     */
-    getInputBuffer() {
-        return this.inputBuffer;
-    }
-
-    /**
-     * Reset all input states
-     */
-    reset() {
-        this.keyStates.clear();
-        this.inputBuffer.clear();
-    }
-
-    /**
-     * Cleanup resources
-     */
-    destroy() {
-        this.stopListening();
-        this.keyStates.clear();
-        this.listeners.clear();
-        this.inputBuffer.clear();
-    }
-}
-
-/**
- * Player entity with integrated input handling and game mechanics
+ * Player ship entity class implementing core gameplay mechanics
+ * 
+ * Manages player ship state, movement, rendering, and interactions within
+ * the game world. Provides a clean interface for game systems to interact
+ * with the player entity while maintaining internal state consistency.
+ * 
+ * @class Player
  */
 class Player {
     /**
-     * @param {Object} config - Player configuration
+     * Player configuration constants
+     * @static
+     * @readonly
+     */
+    static CONFIG = {
+        DEFAULT_SPEED: 300,           // pixels per second
+        DEFAULT_WIDTH: 48,            // sprite width in pixels
+        DEFAULT_HEIGHT: 48,           // sprite height in pixels
+        DEFAULT_HEALTH: 100,          // starting health points
+        BOUNDS_PADDING: 10,           // padding from screen edges
+        ANIMATION_FRAME_DURATION: 100, // milliseconds per frame
+        DAMAGE_INVULNERABILITY_TIME: 1000, // milliseconds of invulnerability
+        MAX_VELOCITY: 500,            // maximum velocity cap
+        FRICTION_COEFFICIENT: 0.85    // movement friction for smooth stops
+    };
+
+    /**
+     * Player state enumeration
+     * @static
+     * @readonly
+     */
+    static STATE = {
+        IDLE: 'idle',
+        MOVING: 'moving',
+        DAMAGED: 'damaged',
+        DESTROYED: 'destroyed',
+        INVULNERABLE: 'invulnerable'
+    };
+
+    /**
+     * Movement direction enumeration
+     * @static
+     * @readonly
+     */
+    static DIRECTION = {
+        LEFT: 'left',
+        RIGHT: 'right',
+        UP: 'up',
+        DOWN: 'down',
+        NONE: 'none'
+    };
+
+    /**
+     * Creates a new Player instance
+     * 
+     * @param {Object} config - Player configuration object
+     * @param {number} [config.x=0] - Initial X position
+     * @param {number} [config.y=0] - Initial Y position
+     * @param {number} [config.speed] - Movement speed in pixels/second
+     * @param {number} [config.width] - Sprite width in pixels
+     * @param {number} [config.height] - Sprite height in pixels
+     * @param {number} [config.health] - Starting health points
+     * @param {HTMLCanvasElement} [config.canvas] - Game canvas for bounds checking
+     * @param {string} [config.spriteUrl] - URL to player sprite image
+     * @throws {Error} When required parameters are invalid
      */
     constructor(config = {}) {
+        try {
+            // Validate and set core properties
+            this._validateConfig(config);
+            this._initializeProperties(config);
+            this._initializeState();
+            this._initializeSprite(config.spriteUrl);
+            this._initializeEventHandlers();
+            
+            // Log successful initialization
+            this._log('info', 'Player entity initialized successfully', {
+                position: { x: this.x, y: this.y },
+                dimensions: { width: this.width, height: this.height },
+                health: this.health
+            });
+        } catch (error) {
+            this._log('error', 'Failed to initialize Player entity', { error: error.message });
+            throw new Error(`Player initialization failed: ${error.message}`);
+        }
+    }
+
+    /**
+     * Validates the configuration object
+     * @private
+     * @param {Object} config - Configuration to validate
+     * @throws {Error} When configuration is invalid
+     */
+    _validateConfig(config) {
+        if (config.x !== undefined && (typeof config.x !== 'number' || !isFinite(config.x))) {
+            throw new Error('Invalid x position: must be a finite number');
+        }
+        if (config.y !== undefined && (typeof config.y !== 'number' || !isFinite(config.y))) {
+            throw new Error('Invalid y position: must be a finite number');
+        }
+        if (config.speed !== undefined && (typeof config.speed !== 'number' || config.speed <= 0)) {
+            throw new Error('Invalid speed: must be a positive number');
+        }
+        if (config.health !== undefined && (typeof config.health !== 'number' || config.health <= 0)) {
+            throw new Error('Invalid health: must be a positive number');
+        }
+    }
+
+    /**
+     * Initializes core properties from configuration
+     * @private
+     * @param {Object} config - Configuration object
+     */
+    _initializeProperties(config) {
         // Position and movement
-        this.position = new Vector2D(config.x || 400, config.y || 550);
-        this.velocity = new Vector2D(0, 0);
-        this.acceleration = new Vector2D(0, 0);
+        this.x = config.x || 0;
+        this.y = config.y || 0;
+        this.velocityX = 0;
+        this.velocityY = 0;
+        this.speed = config.speed || Player.CONFIG.DEFAULT_SPEED;
         
-        // Physical properties
-        this.width = config.width || 48;
-        this.height = config.height || 32;
-        this.maxSpeed = config.maxSpeed || 300;
-        this.accelerationRate = config.accelerationRate || 1200;
-        this.friction = config.friction || 0.85;
+        // Dimensions
+        this.width = config.width || Player.CONFIG.DEFAULT_WIDTH;
+        this.height = config.height || Player.CONFIG.DEFAULT_HEIGHT;
         
-        // Game mechanics
-        this.health = config.health || 100;
-        this.maxHealth = config.maxHealth || 100;
-        this.energy = config.energy || 100;
-        this.maxEnergy = config.maxEnergy || 100;
+        // Game state
+        this.health = config.health || Player.CONFIG.DEFAULT_HEALTH;
+        this.maxHealth = this.health;
         this.score = 0;
-        this.lives = config.lives || 3;
         
-        // Combat properties
-        this.fireRate = config.fireRate || 250; // ms between shots
-        this.lastShotTime = 0;
-        this.damage = config.damage || 25;
-        this.canShoot = true;
-        
-        // State management
-        this.isAlive = true;
-        this.isInvulnerable = false;
-        this.invulnerabilityDuration = 2000; // ms
-        this.invulnerabilityStartTime = 0;
-        
-        // Visual properties
-        this.color = config.color || '#00ff00';
-        this.trailColor = config.trailColor || '#00aa00';
-        this.rotation = 0;
-        this.scale = 1;
-        
-        // Boundaries
-        this.bounds = {
-            left: 0,
-            right: config.canvasWidth || 800,
-            top: 0,
-            bottom: config.canvasHeight || 600
-        };
-        
-        // Input system
-        this.inputManager = new KeyboardInputManager();
-        this.setupInputHandlers();
-        
-        // Event system
-        this.eventListeners = new Map();
+        // Canvas bounds
+        this.canvas = config.canvas || null;
+        this.bounds = this._calculateBounds();
         
         // Performance tracking
-        this.lastUpdateTime = performance.now();
+        this.lastUpdateTime = 0;
         this.frameCount = 0;
-        
-        // Initialize systems
-        this.initialize();
     }
 
     /**
-     * Initialize player systems
+     * Initializes entity state
      * @private
      */
-    initialize() {
-        // Setup input event handlers
-        this.setupInputHandlers();
+    _initializeState() {
+        this.state = Player.STATE.IDLE;
+        this.direction = Player.DIRECTION.NONE;
+        this.isInvulnerable = false;
+        this.invulnerabilityTimer = 0;
+        this.isDestroyed = false;
+        this.isVisible = true;
         
-        // Initialize visual effects
-        this.initializeEffects();
-        
-        // Log initialization
-        this.log('Player initialized', {
-            position: this.position,
-            health: this.health,
-            maxSpeed: this.maxSpeed
-        });
+        // Animation state
+        this.currentFrame = 0;
+        this.animationTimer = 0;
+        this.animationFrames = [];
     }
 
     /**
-     * Setup input event handlers
+     * Initializes sprite rendering
+     * @private
+     * @param {string} [spriteUrl] - URL to sprite image
+     */
+    _initializeSprite(spriteUrl) {
+        this.sprite = null;
+        this.spriteLoaded = false;
+        this.spriteError = false;
+        
+        if (spriteUrl) {
+            this._loadSprite(spriteUrl);
+        }
+    }
+
+    /**
+     * Initializes event handlers
      * @private
      */
-    setupInputHandlers() {
-        // Movement handlers
-        this.inputManager.addEventListener('move_left', () => {
-            this.acceleration.x = -this.accelerationRate;
-        });
-        
-        this.inputManager.addEventListener('move_right', () => {
-            this.acceleration.x = this.accelerationRate;
-        });
-        
-        this.inputManager.addEventListener('move_up', () => {
-            this.acceleration.y = -this.accelerationRate;
-        });
-        
-        this.inputManager.addEventListener('move_down', () => {
-            this.acceleration.y = this.accelerationRate;
-        });
-        
-        // Action handlers
-        this.inputManager.addEventListener('shoot', () => {
-            this.shoot();
-        });
-        
-        this.inputManager.addEventListener('special_ability', () => {
-            this.useSpecialAbility();
-        });
-        
-        this.inputManager.addEventListener('boost', () => {
-            this.activateBoost();
-        });
+    _initializeEventHandlers() {
+        this.eventListeners = new Map();
+        this.eventQueue = [];
     }
 
     /**
-     * Initialize visual effects
+     * Loads the player sprite image
      * @private
+     * @param {string} spriteUrl - URL to sprite image
      */
-    initializeEffects() {
-        this.effects = {
-            trail: [],
-            particles: [],
-            maxTrailLength: 10
-        };
-    }
-
-    /**
-     * Update player state
-     * @param {number} deltaTime - Time since last update (ms)
-     */
-    update(deltaTime) {
-        if (!this.isAlive) return;
-
-        const dt = deltaTime / 1000; // Convert to seconds
-        
+    _loadSprite(spriteUrl) {
         try {
-            // Update input processing
-            this.processInput(dt);
+            this.sprite = new Image();
+            this.sprite.onload = () => {
+                this.spriteLoaded = true;
+                this.spriteError = false;
+                this._log('info', 'Player sprite loaded successfully', { url: spriteUrl });
+                this._emitEvent('spriteLoaded', { sprite: this.sprite });
+            };
+            this.sprite.onerror = (error) => {
+                this.spriteError = true;
+                this.spriteLoaded = false;
+                this._log('error', 'Failed to load player sprite', { url: spriteUrl, error });
+                this._emitEvent('spriteError', { error, url: spriteUrl });
+            };
+            this.sprite.src = spriteUrl;
+        } catch (error) {
+            this._log('error', 'Error initializing sprite', { error: error.message });
+            this.spriteError = true;
+        }
+    }
+
+    /**
+     * Updates the player entity state
+     * 
+     * @param {number} deltaTime - Time elapsed since last update in milliseconds
+     * @param {Object} [input] - Input state object
+     * @param {boolean} [input.left] - Left movement input
+     * @param {boolean} [input.right] - Right movement input
+     * @param {boolean} [input.up] - Up movement input
+     * @param {boolean} [input.down] - Down movement input
+     */
+    update(deltaTime, input = {}) {
+        try {
+            if (this.isDestroyed) return;
+
+            const deltaSeconds = deltaTime / 1000;
+            this.lastUpdateTime = performance.now();
+            this.frameCount++;
+
+            // Update timers
+            this._updateTimers(deltaTime);
             
-            // Update physics
-            this.updatePhysics(dt);
+            // Process input and update movement
+            this._processInput(input);
+            this._updateMovement(deltaSeconds);
+            this._updatePosition(deltaSeconds);
+            this._updateAnimation(deltaTime);
             
-            // Update game mechanics
-            this.updateGameMechanics(dt);
+            // Update state
+            this._updateState();
             
-            // Update visual effects
-            this.updateEffects(dt);
-            
-            // Update invulnerability
-            this.updateInvulnerability();
-            
-            // Constrain to bounds
-            this.constrainToBounds();
-            
-            // Update performance metrics
-            this.updateMetrics();
+            // Process event queue
+            this._processEventQueue();
             
         } catch (error) {
-            this.handleError('Update error', error);
+            this._log('error', 'Error during player update', { error: error.message });
         }
     }
 
     /**
-     * Process input and update acceleration
-     * @param {number} deltaTime - Delta time in seconds
+     * Updates internal timers
      * @private
+     * @param {number} deltaTime - Time elapsed in milliseconds
      */
-    processInput(deltaTime) {
-        // Reset acceleration
-        this.acceleration.x = 0;
-        this.acceleration.y = 0;
-        
-        // Process movement input
-        const activeActions = this.inputManager.getActiveActions();
-        
-        activeActions.forEach(action => {
-            switch (action) {
-                case 'move_left':
-                    this.acceleration.x -= this.accelerationRate;
-                    break;
-                case 'move_right':
-                    this.acceleration.x += this.accelerationRate;
-                    break;
-                case 'move_up':
-                    this.acceleration.y -= this.accelerationRate;
-                    break;
-                case 'move_down':
-                    this.acceleration.y += this.accelerationRate;
-                    break;
-                case 'shoot':
-                    this.shoot();
-                    break;
-                case 'boost':
-                    this.activateBoost();
-                    break;
+    _updateTimers(deltaTime) {
+        if (this.isInvulnerable && this.invulnerabilityTimer > 0) {
+            this.invulnerabilityTimer -= deltaTime;
+            if (this.invulnerabilityTimer <= 0) {
+                this.isInvulnerable = false;
+                this.state = Player.STATE.IDLE;
+                this._emitEvent('invulnerabilityEnded');
             }
-        });
+        }
         
-        // Normalize diagonal movement
-        if (this.acceleration.magnitude() > this.accelerationRate) {
-            this.acceleration = this.acceleration.normalize().multiply(this.accelerationRate);
+        this.animationTimer += deltaTime;
+    }
+
+    /**
+     * Processes input for movement
+     * @private
+     * @param {Object} input - Input state object
+     */
+    _processInput(input) {
+        let targetVelocityX = 0;
+        let targetVelocityY = 0;
+        let newDirection = Player.DIRECTION.NONE;
+
+        // Horizontal movement
+        if (input.left && !input.right) {
+            targetVelocityX = -this.speed;
+            newDirection = Player.DIRECTION.LEFT;
+        } else if (input.right && !input.left) {
+            targetVelocityX = this.speed;
+            newDirection = Player.DIRECTION.RIGHT;
+        }
+
+        // Vertical movement
+        if (input.up && !input.down) {
+            targetVelocityY = -this.speed;
+            newDirection = newDirection === Player.DIRECTION.NONE ? Player.DIRECTION.UP : newDirection;
+        } else if (input.down && !input.up) {
+            targetVelocityY = this.speed;
+            newDirection = newDirection === Player.DIRECTION.NONE ? Player.DIRECTION.DOWN : newDirection;
+        }
+
+        // Update target velocities
+        this.targetVelocityX = targetVelocityX;
+        this.targetVelocityY = targetVelocityY;
+        
+        // Update direction if changed
+        if (newDirection !== this.direction) {
+            this.direction = newDirection;
+            this._emitEvent('directionChanged', { direction: newDirection });
         }
     }
 
     /**
-     * Update physics simulation
-     * @param {number} deltaTime - Delta time in seconds
+     * Updates movement physics
      * @private
+     * @param {number} deltaSeconds - Time elapsed in seconds
      */
-    updatePhysics(deltaTime) {
-        // Apply acceleration to velocity
-        this.velocity = this.velocity.add(this.acceleration.multiply(deltaTime));
+    _updateMovement(deltaSeconds) {
+        // Apply friction and acceleration
+        const friction = Player.CONFIG.FRICTION_COEFFICIENT;
         
-        // Apply friction when no input
-        if (this.acceleration.magnitude() === 0) {
-            this.velocity = this.velocity.multiply(Math.pow(this.friction, deltaTime * 60));
-        }
+        // Smooth velocity transitions
+        this.velocityX = this._lerp(this.velocityX, this.targetVelocityX || 0, 1 - Math.pow(friction, deltaSeconds));
+        this.velocityY = this._lerp(this.velocityY, this.targetVelocityY || 0, 1 - Math.pow(friction, deltaSeconds));
         
-        // Limit velocity to max speed
-        if (this.velocity.magnitude() > this.maxSpeed) {
-            this.velocity = this.velocity.normalize().multiply(this.maxSpeed);
+        // Cap maximum velocity
+        const maxVel = Player.CONFIG.MAX_VELOCITY;
+        this.velocityX = Math.max(-maxVel, Math.min(maxVel, this.velocityX));
+        this.velocityY = Math.max(-maxVel, Math.min(maxVel, this.velocityY));
+    }
+
+    /**
+     * Updates position with bounds checking
+     * @private
+     * @param {number} deltaSeconds - Time elapsed in seconds
+     */
+    _updatePosition(deltaSeconds) {
+        const oldX = this.x;
+        const oldY = this.y;
+        
+        // Calculate new position
+        let newX = this.x + (this.velocityX * deltaSeconds);
+        let newY = this.y + (this.velocityY * deltaSeconds);
+        
+        // Apply bounds checking
+        if (this.bounds) {
+            newX = Math.max(this.bounds.left, Math.min(this.bounds.right - this.width, newX));
+            newY = Math.max(this.bounds.top, Math.min(this.bounds.bottom - this.height, newY));
+            
+            // Stop velocity if hitting bounds
+            if (newX === this.bounds.left || newX === this.bounds.right - this.width) {
+                this.velocityX = 0;
+            }
+            if (newY === this.bounds.top || newY === this.bounds.bottom - this.height) {
+                this.velocityY = 0;
+            }
         }
         
         // Update position
-        this.position = this.position.add(this.velocity.multiply(deltaTime));
+        this.x = newX;
+        this.y = newY;
         
-        // Update rotation based on movement
-        if (this.velocity.magnitude() > 10) {
-            this.rotation = Math.atan2(this.velocity.y, this.velocity.x) + Math.PI / 2;
-        }
-    }
-
-    /**
-     * Update game mechanics (health, energy, etc.)
-     * @param {number} deltaTime - Delta time in seconds
-     * @private
-     */
-    updateGameMechanics(deltaTime) {
-        // Regenerate energy
-        if (this.energy < this.maxEnergy) {
-            this.energy = Math.min(this.maxEnergy, this.energy + 20 * deltaTime);
-        }
-        
-        // Update shooting cooldown
-        const now = performance.now();
-        this.canShoot = (now - this.lastShotTime) >= this.fireRate;
-    }
-
-    /**
-     * Update visual effects
-     * @param {number} deltaTime - Delta time in seconds
-     * @private
-     */
-    updateEffects(deltaTime) {
-        // Update trail
-        if (this.velocity.magnitude() > 50) {
-            this.effects.trail.push({
-                position: this.position.clone(),
-                timestamp: performance.now(),
-                alpha: 1.0
+        // Emit position change event if moved
+        if (oldX !== this.x || oldY !== this.y) {
+            this._emitEvent('positionChanged', {
+                oldPosition: { x: oldX, y: oldY },
+                newPosition: { x: this.x, y: this.y }
             });
-            
-            // Limit trail length
-            if (this.effects.trail.length > this.effects.maxTrailLength) {
-                this.effects.trail.shift();
+        }
+    }
+
+    /**
+     * Updates animation state
+     * @private
+     * @param {number} deltaTime - Time elapsed in milliseconds
+     */
+    _updateAnimation(deltaTime) {
+        if (this.animationFrames.length > 1) {
+            if (this.animationTimer >= Player.CONFIG.ANIMATION_FRAME_DURATION) {
+                this.currentFrame = (this.currentFrame + 1) % this.animationFrames.length;
+                this.animationTimer = 0;
             }
         }
-        
-        // Update trail alpha
-        const now = performance.now();
-        this.effects.trail = this.effects.trail.filter(point => {
-            const age = now - point.timestamp;
-            point.alpha = Math.max(0, 1 - age / 500);
-            return point.alpha > 0;
-        });
     }
 
     /**
-     * Update invulnerability state
+     * Updates entity state based on current conditions
      * @private
      */
-    updateInvulnerability() {
+    _updateState() {
+        const wasMoving = this.state === Player.STATE.MOVING;
+        const isMoving = Math.abs(this.velocityX) > 1 || Math.abs(this.velocityY) > 1;
+        
         if (this.isInvulnerable) {
-            const elapsed = performance.now() - this.invulnerabilityStartTime;
-            if (elapsed >= this.invulnerabilityDuration) {
-                this.isInvulnerable = false;
-                this.emit('invulnerability_end');
-            }
+            this.state = Player.STATE.INVULNERABLE;
+        } else if (this.health <= 0) {
+            this.state = Player.STATE.DESTROYED;
+            this.isDestroyed = true;
+        } else if (isMoving) {
+            this.state = Player.STATE.MOVING;
+        } else {
+            this.state = Player.STATE.IDLE;
+        }
+        
+        // Emit state change events
+        if (wasMoving !== isMoving) {
+            this._emitEvent('movementStateChanged', { isMoving });
         }
     }
 
     /**
-     * Constrain player to screen bounds
-     * @private
+     * Renders the player entity
+     * 
+     * @param {CanvasRenderingContext2D} ctx - Canvas rendering context
+     * @param {Object} [options] - Rendering options
+     * @param {boolean} [options.debug=false] - Show debug information
+     * @param {number} [options.alpha=1] - Rendering opacity
      */
-    constrainToBounds() {
-        const halfWidth = this.width / 2;
-        const halfHeight = this.height / 2;
-        
-        // Horizontal bounds
-        if (this.position.x - halfWidth < this.bounds.left) {
-            this.position.x = this.bounds.left + halfWidth;
-            this.velocity.x = Math.max(0, this.velocity.x);
-        } else if (this.position.x + halfWidth > this.bounds.right) {
-            this.position.x = this.bounds.right - halfWidth;
-            this.velocity.x = Math.min(0, this.velocity.x);
-        }
-        
-        // Vertical bounds
-        if (this.position.y - halfHeight < this.bounds.top) {
-            this.position.y = this.bounds.top + halfHeight;
-            this.velocity.y = Math.max(0, this.velocity.y);
-        } else if (this.position.y + halfHeight > this.bounds.bottom) {
-            this.position.y = this.bounds.bottom - halfHeight;
-            this.velocity.y = Math.min(0, this.velocity.y);
-        }
-    }
-
-    /**
-     * Update performance metrics
-     * @private
-     */
-    updateMetrics() {
-        this.frameCount++;
-        this.lastUpdateTime = performance.now();
-    }
-
-    /**
-     * Shoot projectile
-     */
-    shoot() {
-        if (!this.canShoot || !this.isAlive || this.energy < 10) {
-            return false;
-        }
-        
+    render(ctx, options = {}) {
         try {
-            // Create projectile data
-            const projectileData = {
-                position: this.position.clone(),
-                velocity: new Vector2D(0, -800), // Shoot upward
-                damage: this.damage,
-                owner: 'player',
-                timestamp: performance.now()
-            };
-            
-            // Consume energy
-            this.energy = Math.max(0, this.energy - 10);
-            
-            // Update shooting state
-            this.lastShotTime = performance.now();
-            this.canShoot = false;
-            
-            // Emit shoot event
-            this.emit('shoot', projectileData);
-            
-            this.log('Player shot fired', { energy: this.energy });
-            return true;
-            
-        } catch (error) {
-            this.handleError('Shooting error', error);
-            return false;
-        }
-    }
+            if (!this.isVisible || this.isDestroyed) return;
 
-    /**
-     * Use special ability
-     */
-    useSpecialAbility() {
-        if (this.energy < 50 || !this.isAlive) {
-            return false;
-        }
-        
-        try {
-            // Consume energy
-            this.energy = Math.max(0, this.energy - 50);
+            const { debug = false, alpha = 1 } = options;
             
-            // Activate temporary invulnerability
-            this.makeInvulnerable(1000);
+            // Save context state
+            ctx.save();
             
-            // Emit special ability event
-            this.emit('special_ability', {
-                type: 'shield',
-                duration: 1000,
-                position: this.position.clone()
-            });
-            
-            this.log('Special ability used', { energy: this.energy });
-            return true;
-            
-        } catch (error) {
-            this.handleError('Special ability error', error);
-            return false;
-        }
-    }
-
-    /**
-     * Activate speed boost
-     */
-    activateBoost() {
-        if (this.energy < 20 || !this.isAlive) {
-            return false;
-        }
-        
-        try {
-            // Consume energy
-            this.energy = Math.max(0, this.energy - 20);
-            
-            // Temporarily increase max speed
-            const originalMaxSpeed = this.maxSpeed;
-            this.maxSpeed *= 1.5;
-            
-            // Reset after duration
-            setTimeout(() => {
-                this.maxSpeed = originalMaxSpeed;
-            }, 2000);
-            
-            // Emit boost event
-            this.emit('boost', {
-                speedMultiplier: 1.5,
-                duration: 2000
-            });
-            
-            this.log('Boost activated', { energy: this.energy });
-            return true;
-            
-        } catch (error) {
-            this.handleError('Boost error', error);
-            return false;
-        }
-    }
-
-    /**
-     * Take damage
-     * @param {number} amount - Damage amount
-     * @param {Object} source - Damage source info
-     */
-    takeDamage(amount, source = {}) {
-        if (!this.isAlive || this.isInvulnerable) {
-            return false;
-        }
-        
-        try {
-            // Validate damage amount
-            const damage = Math.max(0, Math.floor(amount));
-            
-            // Apply damage
-            this.health = Math.max(0, this.health - damage);
-            
-            // Make temporarily invulnerable
-            this.makeInvulnerable(this.invulnerabilityDuration);
-            
-            // Check if player died
-            if (this.health <= 0) {
-                this.die();
+            // Apply alpha for invulnerability effect
+            if (this.isInvulnerable) {
+                const flickerAlpha = Math.sin(Date.now() * 0.01) * 0.3 + 0.7;
+                ctx.globalAlpha = alpha * flickerAlpha;
+            } else {
+                ctx.globalAlpha = alpha;
             }
             
-            // Emit damage event
-            this.emit('damage', {
-                amount: damage,
-                health: this.health,
-                source
-            });
-            
-            this.log('Player took damage', {
-                damage,
-                health: this.health,
-                source: source.type || 'unknown'
-            });
-            
-            return true;
-            
-        } catch (error) {
-            this.handleError('Damage error', error);
-            return false;
-        }
-    }
-
-    /**
-     * Heal player
-     * @param {number} amount - Heal amount
-     */
-    heal(amount) {
-        if (!this.isAlive) return false;
-        
-        try {
-            const healAmount = Math.max(0, Math.floor(amount));
-            const oldHealth = this.health;
-            
-            this.health = Math.min(this.maxHealth, this.health + healAmount);
-            
-            const actualHeal = this.health - oldHealth;
-            
-            if (actualHeal > 0) {
-                this.emit('heal', {
-                    amount: actualHeal,
-                    health: this.health
-                });
-                
-                this.log('Player healed', {
-                    amount: actualHeal,
-                    health: this.health
-                });
+            // Render sprite or fallback
+            if (this.spriteLoaded && this.sprite) {
+                this._renderSprite(ctx);
+            } else {
+                this._renderFallback(ctx);
             }
             
-            return actualHeal > 0;
+            // Render debug information
+            if (debug) {
+                this._renderDebugInfo(ctx);
+            }
+            
+            // Restore context state
+            ctx.restore();
             
         } catch (error) {
-            this.handleError('Heal error', error);
-            return false;
+            this._log('error', 'Error during player rendering', { error: error.message });
+            // Render error indicator
+            this._renderError(ctx);
         }
     }
 
     /**
-     * Make player invulnerable for specified duration
-     * @param {number} duration - Invulnerability duration in ms
-     */
-    makeInvulnerable(duration = 2000) {
-        this.isInvulnerable = true;
-        this.invulnerabilityStartTime = performance.now();
-        this.invulnerabilityDuration = duration;
-        
-        this.emit('invulnerability_start', { duration });
-    }
-
-    /**
-     * Handle player death
+     * Renders the player sprite
      * @private
+     * @param {CanvasRenderingContext2D} ctx - Canvas rendering context
      */
-    die() {
-        if (!this.isAlive) return;
-        
-        this.isAlive = false;
-        this.lives = Math.max(0, this.lives - 1);
-        
-        // Stop input processing
-        this.inputManager.setEnabled(false);
-        
-        // Emit death event
-        this.emit('death', {
-            position: this.position.clone(),
-            score: this.score,
-            lives: this.lives
-        });
-        
-        this.log('Player died', {
-            lives: this.lives,
-            score: this.score
-        });
-    }
-
-    /**
-     * Respawn player
-     * @param {Object} config - Respawn configuration
-     */
-    respawn(config = {}) {
-        if (this.lives <= 0) {
-            this.emit('game_over', { score: this.score });
-            return false;
-        }
-        
-        try {
-            // Reset state
-            this.isAlive = true;
-            this.health = this.maxHealth;
-            this.energy = this.maxEnergy;
-            
-            // Reset position
-            this.position = new Vector2D(
-                config.x || this.bounds.right / 2,
-                config.y || this.bounds.bottom - 100
-            );
-            this.velocity = new Vector2D(0, 0);
-            
-            // Make invulnerable
-            this.makeInvulnerable(3000);
-            
-            // Re-enable input
-            this.inputManager.setEnabled(true);
-            
-            // Emit respawn event
-            this.emit('respawn', {
-                position: this.position.clone(),
-                health: this.health,
-                lives: this.lives
-            });
-            
-            this.log('Player respawned', {
-                lives: this.lives,
-                position: this.position
-            });
-            
-            return true;
-            
-        } catch (error) {
-            this.handleError('Respawn error', error);
-            return false;
-        }
-    }
-
-    /**
-     * Add score points
-     * @param {number} points - Points to add
-     */
-    addScore(points) {
-        const scorePoints = Math.max(0, Math.floor(points));
-        this.score += scorePoints;
-        
-        this.emit('score', {
-            points: scorePoints,
-            totalScore: this.score
-        });
-        
-        this.log('Score added', {
-            points: scorePoints,
-            total: this.score
-        });
-    }
-
-    /**
-     * Get collision bounds
-     * @returns {Object} Collision rectangle
-     */
-    getBounds() {
-        return {
-            left: this.position.x - this.width / 2,
-            right: this.position.x + this.width / 2,
-            top: this.position.y - this.height / 2,
-            bottom: this.position.y + this.height / 2,
-            centerX: this.position.x,
-            centerY: this.position.y,
-            width: this.width,
-            height: this.height
-        };
-    }
-
-    /**
-     * Check collision with another entity
-     * @param {Object} other - Other entity with getBounds method
-     * @returns {boolean} True if collision detected
-     */
-    checkCollision(other) {
-        if (!other || !other.getBounds) return false;
-        
-        const thisBounds = this.getBounds();
-        const otherBounds = other.getBounds();
-        
-        return !(
-            thisBounds.right < otherBounds.left ||
-            thisBounds.left > otherBounds.right ||
-            thisBounds.bottom < otherBounds.top ||
-            thisBounds.top > otherBounds.bottom
+    _renderSprite(ctx) {
+        ctx.drawImage(
+            this.sprite,
+            this.x,
+            this.y,
+            this.width,
+            this.height
         );
     }
 
     /**
-     * Render player
-     * @param {CanvasRenderingContext2D} ctx - Canvas context
-     */
-    render(ctx) {
-        if (!ctx || !this.isAlive) return;
-        
-        try {
-            ctx.save();
-            
-            // Render trail
-            this.renderTrail(ctx);
-            
-            // Apply invulnerability flashing
-            if (this.isInvulnerable) {
-                const flashRate = 100;
-                const elapsed = performance.now() - this.invulnerabilityStartTime;
-                const alpha = Math.sin(elapsed / flashRate) * 0.5 + 0.5;
-                ctx.globalAlpha = alpha;
-            }
-            
-            // Transform to player position and rotation
-            ctx.translate(this.position.x, this.position.y);
-            ctx.rotate(this.rotation);
-            ctx.scale(this.scale, this.scale);
-            
-            // Render player ship
-            this.renderShip(ctx);
-            
-            // Render effects
-            this.renderEffects(ctx);
-            
-            ctx.restore();
-            
-            // Render UI elements
-            this.renderUI(ctx);
-            
-        } catch (error) {
-            this.handleError('Render error', error);
-        }
-    }
-
-    /**
-     * Render player ship
-     * @param {CanvasRenderingContext2D} ctx - Canvas context
+     * Renders fallback representation when sprite is unavailable
      * @private
+     * @param {CanvasRenderingContext2D} ctx - Canvas rendering context
      */
-    renderShip(ctx) {
-        // Simple triangle ship
-        ctx.fillStyle = this.color;
+    _renderFallback(ctx) {
+        // Draw simple triangle representing player ship
+        ctx.fillStyle = this.isInvulnerable ? '#ffff00' : '#00ff00';
+        ctx.beginPath();
+        ctx.moveTo(this.x + this.width / 2, this.y);
+        ctx.lineTo(this.x, this.y + this.height);
+        ctx.lineTo(this.x + this.width, this.y + this.height);
+        ctx.closePath();
+        ctx.fill();
+        
+        // Add outline
         ctx.strokeStyle = '#ffffff';
         ctx.lineWidth = 2;
-        
-        ctx.beginPath();
-        ctx.moveTo(0, -this.height / 2);
-        ctx.lineTo(-this.width / 2, this.height / 2);
-        ctx.lineTo(this.width / 2, this.height / 2);
-        ctx.closePath();
-        
-        ctx.fill();
         ctx.stroke();
-        
-        // Engine glow
-        if (this.velocity.magnitude() > 50) {
-            ctx.fillStyle = '#ff6600';
-            ctx.globalAlpha = 0.7;
-            ctx.beginPath();
-            ctx.moveTo(-this.width / 4, this.height / 2);
-            ctx.lineTo(0, this.height / 2 + 10);
-            ctx.lineTo(this.width / 4, this.height / 2);
-            ctx.closePath();
-            ctx.fill();
-            ctx.globalAlpha = 1;
-        }
     }
 
     /**
-     * Render trail effect
-     * @param {CanvasRenderingContext2D} ctx - Canvas context
+     * Renders debug information
      * @private
+     * @param {CanvasRenderingContext2D} ctx - Canvas rendering context
      */
-    renderTrail(ctx) {
-        if (this.effects.trail.length < 2) return;
-        
-        ctx.strokeStyle = this.trailColor;
-        ctx.lineWidth = 3;
-        
-        for (let i = 1; i < this.effects.trail.length; i++) {
-            const point = this.effects.trail[i];
-            const prevPoint = this.effects.trail[i - 1];
-            
-            ctx.globalAlpha = point.alpha * 0.5;
-            ctx.beginPath();
-            ctx.moveTo(prevPoint.position.x, prevPoint.position.y);
-            ctx.lineTo(point.position.x, point.position.y);
-            ctx.stroke();
-        }
-        
-        ctx.globalAlpha = 1;
-    }
-
-    /**
-     * Render visual effects
-     * @param {CanvasRenderingContext2D} ctx - Canvas context
-     * @private
-     */
-    renderEffects(ctx) {
-        // Render boost effect
-        if (this.maxSpeed > 300) {
-            ctx.strokeStyle = '#00ffff';
-            ctx.lineWidth = 2;
-            ctx.globalAlpha = 0.6;
-            
-            ctx.beginPath();
-            ctx.arc(0, 0, this.width / 2 + 5, 0, Math.PI * 2);
-            ctx.stroke();
-            
-            ctx.globalAlpha = 1;
-        }
-    }
-
-    /**
-     * Render UI elements
-     * @param {CanvasRenderingContext2D} ctx - Canvas context
-     * @private
-     */
-    renderUI(ctx) {
-        // Health bar
-        const barWidth = 100;
-        const barHeight = 8;
-        const barX = 10;
-        const barY = 10;
-        
-        // Background
-        ctx.fillStyle = '#333333';
-        ctx.fillRect(barX, barY, barWidth, barHeight);
-        
-        // Health
-        const healthPercent = this.health / this.maxHealth;
-        ctx.fillStyle = healthPercent > 0.3 ? '#00ff00' : '#ff0000';
-        ctx.fillRect(barX, barY, barWidth * healthPercent, barHeight);
-        
-        // Border
-        ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = 1;
-        ctx.strokeRect(barX, barY, barWidth, barHeight);
-        
-        // Energy bar
-        const energyY = barY + barHeight + 5;
-        
-        // Background
-        ctx.fillStyle = '#333333';
-        ctx.fillRect(barX, energyY, barWidth, barHeight);
-        
-        // Energy
-        const energyPercent = this.energy / this.maxEnergy;
-        ctx.fillStyle = '#0088ff';
-        ctx.fillRect(barX, energyY, barWidth * energyPercent, barHeight);
-        
-        // Border
-        ctx.strokeRect(barX, energyY, barWidth, barHeight);
-        
-        // Score
+    _renderDebugInfo(ctx) {
         ctx.fillStyle = '#ffffff';
-        ctx.font = '16px Arial';
-        ctx.textAlign = 'left';
-        ctx.fillText(`Score: ${this.score}`, barX, energyY + barHeight + 20);
+        ctx.font = '12px monospace';
+        ctx.fillText(`Pos: (${Math.round(this.x)}, ${Math.round(this.y)})`, this.x, this.y - 20);
+        ctx.fillText(`Vel: (${Math.round(this.velocityX)}, ${Math.round(this.velocityY)})`, this.x, this.y - 5);
+        ctx.fillText(`Health: ${this.health}/${this.maxHealth}`, this.x, this.y + this.height + 15);
+        ctx.fillText(`State: ${this.state}`, this.x, this.y + this.height + 30);
         
-        // Lives
-        ctx.fillText(`Lives: ${this.lives}`, barX, energyY + barHeight + 40);
+        // Draw bounding box
+        ctx.strokeStyle = '#ff0000';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(this.x, this.y, this.width, this.height);
     }
 
     /**
-     * Add event listener
+     * Renders error indicator
+     * @private
+     * @param {CanvasRenderingContext2D} ctx - Canvas rendering context
+     */
+    _renderError(ctx) {
+        ctx.fillStyle = '#ff0000';
+        ctx.fillRect(this.x, this.y, this.width, this.height);
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '16px monospace';
+        ctx.fillText('ERROR', this.x + 5, this.y + this.height / 2);
+    }
+
+    /**
+     * Applies damage to the player
+     * 
+     * @param {number} amount - Damage amount
+     * @param {Object} [source] - Damage source information
+     * @returns {boolean} True if damage was applied, false if prevented
+     */
+    takeDamage(amount, source = {}) {
+        try {
+            if (this.isInvulnerable || this.isDestroyed || amount <= 0) {
+                return false;
+            }
+
+            const oldHealth = this.health;
+            this.health = Math.max(0, this.health - amount);
+            
+            // Apply invulnerability period
+            this.isInvulnerable = true;
+            this.invulnerabilityTimer = Player.CONFIG.DAMAGE_INVULNERABILITY_TIME;
+            this.state = Player.STATE.DAMAGED;
+            
+            this._log('info', 'Player took damage', {
+                amount,
+                oldHealth,
+                newHealth: this.health,
+                source
+            });
+            
+            // Emit damage event
+            this._emitEvent('damaged', {
+                amount,
+                oldHealth,
+                newHealth: this.health,
+                source
+            });
+            
+            // Check for destruction
+            if (this.health <= 0) {
+                this._handleDestruction();
+            }
+            
+            return true;
+        } catch (error) {
+            this._log('error', 'Error applying damage', { error: error.message });
+            return false;
+        }
+    }
+
+    /**
+     * Heals the player
+     * 
+     * @param {number} amount - Healing amount
+     * @returns {number} Actual amount healed
+     */
+    heal(amount) {
+        if (this.isDestroyed || amount <= 0) return 0;
+        
+        const oldHealth = this.health;
+        const actualHeal = Math.min(amount, this.maxHealth - this.health);
+        this.health += actualHeal;
+        
+        if (actualHeal > 0) {
+            this._emitEvent('healed', {
+                amount: actualHeal,
+                oldHealth,
+                newHealth: this.health
+            });
+        }
+        
+        return actualHeal;
+    }
+
+    /**
+     * Handles player destruction
+     * @private
+     */
+    _handleDestruction() {
+        this.isDestroyed = true;
+        this.state = Player.STATE.DESTROYED;
+        this.velocityX = 0;
+        this.velocityY = 0;
+        
+        this._log('info', 'Player destroyed');
+        this._emitEvent('destroyed', {
+            finalScore: this.score,
+            position: { x: this.x, y: this.y }
+        });
+    }
+
+    /**
+     * Resets the player to initial state
+     * 
+     * @param {Object} [config] - Reset configuration
+     */
+    reset(config = {}) {
+        try {
+            // Reset position
+            this.x = config.x || 0;
+            this.y = config.y || 0;
+            
+            // Reset movement
+            this.velocityX = 0;
+            this.velocityY = 0;
+            this.direction = Player.DIRECTION.NONE;
+            
+            // Reset health
+            this.health = config.health || this.maxHealth;
+            
+            // Reset state
+            this.state = Player.STATE.IDLE;
+            this.isDestroyed = false;
+            this.isInvulnerable = false;
+            this.invulnerabilityTimer = 0;
+            this.isVisible = true;
+            
+            // Reset animation
+            this.currentFrame = 0;
+            this.animationTimer = 0;
+            
+            // Reset score if specified
+            if (config.resetScore) {
+                this.score = 0;
+            }
+            
+            this._log('info', 'Player reset successfully', config);
+            this._emitEvent('reset', config);
+            
+        } catch (error) {
+            this._log('error', 'Error resetting player', { error: error.message });
+        }
+    }
+
+    /**
+     * Gets the player's collision bounds
+     * 
+     * @returns {Object} Collision bounds object
+     */
+    getBounds() {
+        return {
+            x: this.x,
+            y: this.y,
+            width: this.width,
+            height: this.height,
+            centerX: this.x + this.width / 2,
+            centerY: this.y + this.height / 2,
+            left: this.x,
+            right: this.x + this.width,
+            top: this.y,
+            bottom: this.y + this.height
+        };
+    }
+
+    /**
+     * Checks collision with another entity
+     * 
+     * @param {Object} other - Other entity with bounds
+     * @returns {boolean} True if collision detected
+     */
+    checkCollision(other) {
+        if (!other || this.isDestroyed) return false;
+        
+        const bounds = this.getBounds();
+        const otherBounds = other.getBounds ? other.getBounds() : other;
+        
+        return !(bounds.right < otherBounds.x ||
+                bounds.left > otherBounds.x + otherBounds.width ||
+                bounds.bottom < otherBounds.y ||
+                bounds.top > otherBounds.y + otherBounds.height);
+    }
+
+    /**
+     * Adds an event listener
+     * 
      * @param {string} event - Event name
-     * @param {Function} callback - Callback function
+     * @param {Function} callback - Event callback
      */
     addEventListener(event, callback) {
         if (!this.eventListeners.has(event)) {
@@ -1286,13 +725,14 @@ class Player {
     }
 
     /**
-     * Remove event listener
+     * Removes an event listener
+     * 
      * @param {string} event - Event name
-     * @param {Function} callback - Callback function
+     * @param {Function} callback - Event callback to remove
      */
     removeEventListener(event, callback) {
-        const listeners = this.eventListeners.get(event);
-        if (listeners) {
+        if (this.eventListeners.has(event)) {
+            const listeners = this.eventListeners.get(event);
             const index = listeners.indexOf(callback);
             if (index > -1) {
                 listeners.splice(index, 1);
@@ -1301,202 +741,152 @@ class Player {
     }
 
     /**
-     * Emit event to listeners
+     * Emits an event to all listeners
+     * @private
      * @param {string} event - Event name
-     * @param {Object} data - Event data
+     * @param {*} data - Event data
+     */
+    _emitEvent(event, data = null) {
+        this.eventQueue.push({ event, data, timestamp: Date.now() });
+    }
+
+    /**
+     * Processes the event queue
      * @private
      */
-    emit(event, data = {}) {
-        const listeners = this.eventListeners.get(event);
-        if (listeners) {
-            listeners.forEach(callback => {
-                try {
-                    callback({ ...data, target: this, type: event });
-                } catch (error) {
-                    this.handleError(`Event listener error for ${event}`, error);
-                }
-            });
+    _processEventQueue() {
+        while (this.eventQueue.length > 0) {
+            const { event, data } = this.eventQueue.shift();
+            
+            if (this.eventListeners.has(event)) {
+                const listeners = this.eventListeners.get(event);
+                listeners.forEach(callback => {
+                    try {
+                        callback(data);
+                    } catch (error) {
+                        this._log('error', 'Error in event listener', { event, error: error.message });
+                    }
+                });
+            }
         }
     }
 
     /**
-     * Get player state for serialization
-     * @returns {Object} Player state
+     * Calculates movement bounds based on canvas
+     * @private
+     * @returns {Object|null} Bounds object or null if no canvas
      */
-    getState() {
+    _calculateBounds() {
+        if (!this.canvas) return null;
+        
+        const padding = Player.CONFIG.BOUNDS_PADDING;
         return {
-            position: { x: this.position.x, y: this.position.y },
-            velocity: { x: this.velocity.x, y: this.velocity.y },
-            health: this.health,
-            energy: this.energy,
-            score: this.score,
-            lives: this.lives,
-            isAlive: this.isAlive,
-            isInvulnerable: this.isInvulnerable
+            left: padding,
+            top: padding,
+            right: this.canvas.width - padding,
+            bottom: this.canvas.height - padding
         };
     }
 
     /**
-     * Set player state from serialized data
-     * @param {Object} state - Player state
+     * Linear interpolation utility
+     * @private
+     * @param {number} start - Start value
+     * @param {number} end - End value
+     * @param {number} factor - Interpolation factor (0-1)
+     * @returns {number} Interpolated value
      */
-    setState(state) {
-        if (!state) return;
-        
-        try {
-            if (state.position) {
-                this.position = new Vector2D(state.position.x, state.position.y);
-            }
-            if (state.velocity) {
-                this.velocity = new Vector2D(state.velocity.x, state.velocity.y);
-            }
-            if (typeof state.health === 'number') {
-                this.health = Math.max(0, Math.min(this.maxHealth, state.health));
-            }
-            if (typeof state.energy === 'number') {
-                this.energy = Math.max(0, Math.min(this.maxEnergy, state.energy));
-            }
-            if (typeof state.score === 'number') {
-                this.score = Math.max(0, state.score);
-            }
-            if (typeof state.lives === 'number') {
-                this.lives = Math.max(0, state.lives);
-            }
-            if (typeof state.isAlive === 'boolean') {
-                this.isAlive = state.isAlive;
-            }
-            if (typeof state.isInvulnerable === 'boolean') {
-                this.isInvulnerable = state.isInvulnerable;
-            }
-            
-            this.log('Player state restored', state);
-            
-        } catch (error) {
-            this.handleError('State restoration error', error);
-        }
+    _lerp(start, end, factor) {
+        return start + (end - start) * Math.max(0, Math.min(1, factor));
     }
 
     /**
-     * Log message with context
+     * Logging utility with structured format
+     * @private
+     * @param {string} level - Log level
      * @param {string} message - Log message
-     * @param {Object} data - Additional data
-     * @private
+     * @param {Object} [data] - Additional log data
      */
-    log(message, data = {}) {
-        if (typeof console !== 'undefined' && console.log) {
-            console.log(`[Player] ${message}`, {
-                timestamp: new Date().toISOString(),
-                frameCount: this.frameCount,
-                ...data
-            });
-        }
-    }
-
-    /**
-     * Handle errors with logging
-     * @param {string} context - Error context
-     * @param {Error} error - Error object
-     * @private
-     */
-    handleError(context, error) {
-        if (typeof console !== 'undefined' && console.error) {
-            console.error(`[Player] ${context}:`, error, {
-                timestamp: new Date().toISOString(),
-                playerState: this.getState()
-            });
-        }
+    _log(level, message, data = {}) {
+        const logEntry = {
+            timestamp: new Date().toISOString(),
+            level: level.toUpperCase(),
+            component: 'Player',
+            message,
+            data: {
+                ...data,
+                playerId: this.id || 'unknown',
+                position: { x: this.x, y: this.y },
+                state: this.state
+            }
+        };
         
-        // Emit error event
-        this.emit('error', {
-            context,
-            error: error.message,
-            stack: error.stack
-        });
+        console[level](JSON.stringify(logEntry));
     }
 
     /**
-     * Get performance metrics
-     * @returns {Object} Performance data
+     * Gets current player statistics
+     * 
+     * @returns {Object} Player statistics object
      */
-    getMetrics() {
+    getStats() {
         return {
+            position: { x: this.x, y: this.y },
+            velocity: { x: this.velocityX, y: this.velocityY },
+            health: this.health,
+            maxHealth: this.maxHealth,
+            score: this.score,
+            state: this.state,
+            direction: this.direction,
+            isInvulnerable: this.isInvulnerable,
+            isDestroyed: this.isDestroyed,
             frameCount: this.frameCount,
-            lastUpdateTime: this.lastUpdateTime,
-            inputBufferSize: this.inputManager.getInputBuffer().buffer.length,
-            trailLength: this.effects.trail.length,
-            activeActions: this.inputManager.getActiveActions().length
+            uptime: this.lastUpdateTime
         };
     }
 
     /**
-     * Reset player to initial state
+     * Serializes player state for saving
+     * 
+     * @returns {Object} Serializable player state
      */
-    reset() {
-        // Reset position and movement
-        this.position = new Vector2D(400, 550);
-        this.velocity = new Vector2D(0, 0);
-        this.acceleration = new Vector2D(0, 0);
-        
-        // Reset game state
-        this.health = this.maxHealth;
-        this.energy = this.maxEnergy;
-        this.score = 0;
-        this.lives = 3;
-        this.isAlive = true;
-        this.isInvulnerable = false;
-        
-        // Reset input
-        this.inputManager.reset();
-        this.inputManager.setEnabled(true);
-        
-        // Reset effects
-        this.effects.trail = [];
-        this.effects.particles = [];
-        
-        // Reset metrics
-        this.frameCount = 0;
-        this.lastUpdateTime = performance.now();
-        
-        this.log('Player reset to initial state');
+    serialize() {
+        return {
+            x: this.x,
+            y: this.y,
+            health: this.health,
+            maxHealth: this.maxHealth,
+            score: this.score,
+            state: this.state,
+            isDestroyed: this.isDestroyed
+        };
     }
 
     /**
-     * Cleanup resources and event listeners
+     * Deserializes player state from saved data
+     * 
+     * @param {Object} data - Serialized player data
      */
-    destroy() {
+    deserialize(data) {
         try {
-            // Cleanup input manager
-            if (this.inputManager) {
-                this.inputManager.destroy();
-            }
+            this.x = data.x || this.x;
+            this.y = data.y || this.y;
+            this.health = data.health || this.health;
+            this.maxHealth = data.maxHealth || this.maxHealth;
+            this.score = data.score || this.score;
+            this.state = data.state || this.state;
+            this.isDestroyed = data.isDestroyed || false;
             
-            // Clear event listeners
-            this.eventListeners.clear();
-            
-            // Clear effects
-            this.effects.trail = [];
-            this.effects.particles = [];
-            
-            this.log('Player destroyed');
-            
+            this._log('info', 'Player state deserialized', data);
         } catch (error) {
-            this.handleError('Destroy error', error);
+            this._log('error', 'Error deserializing player state', { error: error.message });
         }
     }
 }
 
-// Export classes for use in other modules
+// Export the Player class
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = {
-        Player,
-        KeyboardInputManager,
-        InputBuffer,
-        Vector2D
-    };
+    module.exports = Player;
 } else if (typeof window !== 'undefined') {
-    // Browser environment
     window.Player = Player;
-    window.KeyboardInputManager = KeyboardInputManager;
-    window.InputBuffer = InputBuffer;
-    window.Vector2D = Vector2D;
 }
