@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <!-- Meta Tags for Responsive Design and SEO -->
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="description" content="Space Invaders - Classic arcade game reimagined for modern browsers with HTML5 Canvas">
+    <meta name="keywords" content="space invaders, arcade game, html5 game, canvas game, retro gaming">
+    <meta name="author" content="Space Invaders JS V106">
+    <meta name="robots" content="index, follow">
+    
+    <!-- Open Graph Meta Tags for Social Sharing -->
+    <meta property="og:title" content="Space Invaders - HTML5 Canvas Game">
+    <meta property="og:description" content="Classic arcade action in your browser. Defend Earth from alien invasion!">
+    <meta property="og:type" content="website">
+    <meta property="og:image" content="./assets/sprites/player-ship.png">
+    
+    <!-- PWA Meta Tags -->
+    <meta name="theme-color" content="#000000">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Space Invaders">
+    
+    <!-- Favicon and App Icons -->
+    <link rel="icon" type="image/x-icon" href="./favicon.ico">
+    <link rel="apple-touch-icon" sizes="180x180" href="./assets/icons/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="./assets/icons/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="./assets/icons/favicon-16x16.png">
+    
+    <!-- PWA Manifest -->
+    <link rel="manifest" href="./manifest.json">
+    
+    <title>Space Invaders - HTML5 Canvas Game</title>
+    
+    <!-- Preload Critical Resources -->
+    <link rel="preload" href="./css/styles.css" as="style">
+    <link rel="preload" href="./js/game.js" as="script">
+    
+    <!-- Critical CSS Inline for Performance -->
+    <style>
+        /* Critical CSS for initial render */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            background: #000;
+            color: #fff;
+            font-family: 'Courier New', monospace;
+            overflow: hidden;
+            user-select: none;
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+        }
+        
+        #gameContainer {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background: radial-gradient(ellipse at center, #001122 0%, #000000 100%);
+        }
+        
+        #gameCanvas {
+            border: 2px solid #00ff00;
+            background: #000;
+            image-rendering: pixelated;
+            image-rendering: -moz-crisp-edges;
+            image-rendering: crisp-edges;
+            max-width: 100%;
+            max-height: 100%;
+        }
+        
+        .loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #00ff00;
+            font-size: 24px;
+            text-align: center;
+            z-index: 1000;
+        }
+        
+        .loading::after {
+            content: '';
+            animation: dots 1.5s steps(5, end) infinite;
+        }
+        
+        @keyframes dots {
+            0%, 20% { content: ''; }
+            40% { content: '.'; }
+            60% { content: '..'; }
+            80%, 100% { content: '...'; }
+        }
+        
+        /* Mobile Optimizations */
+        @media (max-width: 768px) {
+            #gameCanvas {
+                border-width: 1px;
+            }
+            
+            .loading {
+                font-size: 18px;
+            }
+        }
+        
+        /* High DPI Display Support */
+        @media (-webkit-min-device-pixel-ratio: 2), (min-resolution: 192dpi) {
+            #gameCanvas {
+                image-rendering: auto;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Game Container -->
+    <div id="gameContainer">
+        <!-- Loading Screen -->
+        <div id="loadingScreen" class="loading" aria-live="polite">
+            <div>INITIALIZING SPACE INVADERS</div>
+            <div style="font-size: 14px; margin-top: 10px;">Loading game assets</div>
+        </div>
+        
+        <!-- Main Game Canvas -->
+        <canvas 
+            id="gameCanvas" 
+            width="800" 
+            height="600"
+            role="application"
+            aria-label="Space Invaders Game Canvas"
+            tabindex="0">
+            <p>Your browser does not support HTML5 Canvas. Please upgrade to a modern browser to play Space Invaders.</p>
+        </canvas>
+        
+        <!-- UI Overlay Container -->
+        <div id="uiOverlay" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 100;">
+            <!-- Score Display -->
+            <div id="scoreDisplay" style="position: absolute; top: 20px; left: 20px; color: #00ff00; font-size: 18px; pointer-events: none;">
+                <div>SCORE: <span id="currentScore">0</span></div>
+                <div>HIGH: <span id="highScore">0</span></div>
+                <div>LIVES: <span id="livesCount">3</span></div>
+            </div>
+            
+            <!-- Wave Information -->
+            <div id="waveInfo" style="position: absolute; top: 20px; right: 20px; color: #00ff00; font-size: 18px; text-align: right; pointer-events: none;">
+                <div>WAVE: <span id="currentWave">1</span></div>
+                <div>ENEMIES: <span id="enemiesLeft">0</span></div>
+            </div>
+            
+            <!-- Mobile Controls Container -->
+            <div id="mobileControls" style="position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); display: none; pointer-events: auto;">
+                <!-- Virtual controls will be inserted here by JavaScript -->
+            </div>
+            
+            <!-- Game Messages -->
+            <div id="gameMessages" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; color: #00ff00; font-size: 24px; pointer-events: none; z-index: 200;">
+                <!-- Dynamic messages will appear here -->
+            </div>
+        </div>
+        
+        <!-- Audio Controls -->
+        <div id="audioControls" style="position: absolute; bottom: 20px; right: 20px; z-index: 150;">
+            <button id="muteButton" 
+                    style="background: transparent; border: 1px solid #00ff00; color: #00ff00; padding: 8px 12px; cursor: pointer; font-family: inherit;"
+                    aria-label="Toggle sound">
+                🔊
+            </button>
+        </div>
+        
+        <!-- Pause Menu -->
+        <div id="pauseMenu" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: none; z-index: 300;">
+            <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; color: #00ff00;">
+                <h2 style="margin-bottom: 20px;">GAME PAUSED</h2>
+                <div style="margin-bottom: 10px;">Press SPACE or ESC to resume</div>
+                <div style="font-size: 14px; opacity: 0.7;">Press R to restart</div>
+            </div>
+        </div>
+        
+        <!-- Game Over Screen -->
+        <div id="gameOverScreen" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); display: none; z-index: 400;">
+            <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; color: #ff0000;">
+                <h2 style="margin-bottom: 20px; font-size: 36px;">GAME OVER</h2>
+                <div style="margin-bottom: 20px; color: #00ff00;">
+                    <div>Final Score: <span id="finalScore">0</span></div>
+                    <div id="newHighScore" style="display: none; color: #ffff00; margin-top: 10px;">NEW HIGH SCORE!</div>
+                </div>
+                <div style="font-size: 16px; margin-bottom: 20px;">Press SPACE to play again</div>
+                <div style="font-size: 14px; opacity: 0.7;">Press ESC for main menu</div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Error Boundary -->
+    <div id="errorBoundary" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #000; color: #ff0000; display: none; z-index: 9999;">
+        <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; padding: 20px;">
+            <h2>SYSTEM ERROR</h2>
+            <div id="errorMessage" style="margin: 20px 0; font-family: monospace; font-size: 14px;"></div>
+            <div style="font-size: 12px; opacity: 0.7;">Please refresh the page to restart</div>
+        </div>
+    </div>
+    
+    <!-- Performance Monitor (Development) -->
+    <div id="performanceMonitor" style="position: absolute; top: 10px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.7); color: #00ff00; padding: 5px 10px; font-size: 12px; display: none; z-index: 500;">
+        FPS: <span id="fpsCounter">60</span> | 
+        Entities: <span id="entityCount">0</span> | 
+        Memory: <span id="memoryUsage">0MB</span>
+    </div>
+    
+    <!-- Accessibility Announcements -->
+    <div id="ariaAnnouncements" aria-live="polite" aria-atomic="true" style="position: absolute; left: -10000px; width: 1px; height: 1px; overflow: hidden;">
+        <!-- Screen reader announcements will be inserted here -->
+    </div>
+    
+    <!-- Service Worker Registration -->
+    <script>
+        // Service Worker Registration for PWA
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('./sw.js')
+                    .then(registration => {
+                        console.log('SW registered: ', registration);
+                    })
+                    .catch(registrationError => {
+                        console.log('SW registration failed: ', registrationError);
+                    });
+            });
+        }
+        
+        // Global Error Handler
+        window.addEventListener('error', (event) => {
+            console.error('Global error:', event.error);
+            const errorBoundary = document.getElementById('errorBoundary');
+            const errorMessage = document.getElementById('errorMessage');
+            if (errorBoundary && errorMessage) {
+                errorMessage.textContent = `${event.error.name}: ${event.error.message}`;
+                errorBoundary.style.display = 'block';
+            }
+        });
+        
+        // Unhandled Promise Rejection Handler
+        window.addEventListener('unhandledrejection', (event) => {
+            console.error('Unhandled promise rejection:', event.reason);
+            event.preventDefault();
+        });
+        
+        // Viewport Meta Tag Dynamic Adjustment
+        function adjustViewport() {
+            const viewport = document.querySelector('meta[name="viewport"]');
+            const isLandscape = window.innerWidth > window.innerHeight;
+            
+            if (isLandscape && window.innerWidth < 1024) {
+                viewport.content = 'width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover';
+            } else {
+                viewport.content = 'width=device-width, initial-scale=1.0, user-scalable=no';
+            }
+        }
+        
+        // Orientation Change Handler
+        window.addEventListener('orientationchange', () => {
+            setTimeout(adjustViewport, 100);
+        });
+        
+        // Initial viewport adjustment
+        adjustViewport();
+        
+        // Canvas Context Test
+        function testCanvasSupport() {
+            const canvas = document.getElementById('gameCanvas');
+            if (!canvas || !canvas.getContext) {
+                throw new Error('HTML5 Canvas not supported');
+            }
+            
+            const ctx = canvas.getContext('2d');
+            if (!ctx) {
+                throw new Error('2D Canvas context not available');
+            }
+            
+            return true;
+        }
+        
+        // Initialize canvas support check
+        try {
+            testCanvasSupport();
+        } catch (error) {
+            console.error('Canvas support error:', error);
+            const errorBoundary = document.getElementById('errorBoundary');
+            const errorMessage = document.getElementById('errorMessage');
+            if (errorBoundary && errorMessage) {
+                errorMessage.textContent = error.message;
+                errorBoundary.style.display = 'block';
+            }
+        }
+        
+        // Performance Monitoring
+        let lastTime = performance.now();
+        let frameCount = 0;
+        let fps = 60;
+        
+        function updatePerformanceMonitor() {
+            const now = performance.now();
+            frameCount++;
+            
+            if (now - lastTime >= 1000) {
+                fps = Math.round((frameCount * 1000) / (now - lastTime));
+                frameCount = 0;
+                lastTime = now;
+                
+                const fpsCounter = document.getElementById('fpsCounter');
+                if (fpsCounter) {
+                    fpsCounter.textContent = fps;
+                }
+                
+                // Memory usage (if available)
+                if (performance.memory) {
+                    const memoryUsage = document.getElementById('memoryUsage');
+                    if (memoryUsage) {
+                        const usedMB = Math.round(performance.memory.usedJSHeapSize / 1048576);
+                        memoryUsage.textContent = usedMB + 'MB';
+                    }
+                }
+            }
+            
+            requestAnimationFrame(updatePerformanceMonitor);
+        }
+        
+        // Start performance monitoring in development
+        if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+            document.getElementById('performanceMonitor').style.display = 'block';
+            updatePerformanceMonitor();
+        }
+    </script>
+    
+    <!-- Game Scripts - Load Order Important -->
+    <!-- Core utilities and constants first -->
+    <script src="./js/utils/constants.js" defer></script>
+    <script src="./js/utils/helpers.js" defer></script>
+    <script src="./js/utils/vector2d.js" defer></script>
+    
+    <!-- Engine and core systems -->
+    <script src="./js/engine/GameEngine.js" defer></script>
+    <script src="./js/core/game-loop.js" defer></script>
+    <script src="./js/renderer.js" defer></script>
+    
+    <!-- Input and audio systems -->
+    <script src="./js/input/inputManager.js" defer></script>
+    <script src="./js/audio/AudioManager.js" defer></script>
+    
+    <!-- Game entities and systems -->
+    <script src="./js/entities/entity.js" defer></script>
+    <script src="./js/entities/player.js" defer></script>
+    <script src="./js/entities/enemy.js" defer></script>
+    <script src="./js/entities/projectile.js" defer></script>
+    
+    <!-- Game managers and systems -->
+    <script src="./js/systems/collisionManager.js" defer></script>
+    <script src="./js/managers/WaveManager.js" defer></script>
+    <script src="./js/ui/UIManager.js" defer></script>
+    
+    <!-- Main game initialization -->
+    <script src="./js/game.js" defer></script>
+    
+    <!-- Analytics and Tracking (Optional) -->
+    <script>
+        // Basic analytics without external dependencies
+        function trackGameEvent(eventName, eventData = {}) {
+            if (typeof gtag !== 'undefined') {
+                gtag('event', eventName, eventData);
+            }
+            
+            // Custom analytics can be added here
+            console.log('Game Event:', eventName, eventData);
+        }
+        
+        // Track game start
+        window.addEventListener('load', () => {
+            trackGameEvent('game_loaded', {
+                screen_resolution: `${screen.width}x${screen.height}`,
+                viewport_size: `${window.innerWidth}x${window.innerHeight}`,
+                user_agent: navigator.userAgent.substring(0, 100)
+            });
+        });
+    </script>
+</body>
+</html>
